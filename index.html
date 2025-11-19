@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PoleSync Editor (Clean Start - Basic List)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .font-sans { font-family: 'Inter', sans-serif; }
+        .pole-item { transition: background-color 0.15s; }
+        .pole-item:hover { cursor: pointer; background-color: #f7f7f7; }
+        .pole-item.selected { border-left: 4px solid #3b82f6; background-color: #f0f9ff; }
+        .button-status { transition: background-color 0.15s; }
+        /* No map styles needed */
+    </style>
+</head>
+<body class="min-h-screen bg-gray-50 font-sans p-4 sm:p-8">
+
+    <div class="max-w-4xl mx-auto">
+        <header class="bg-white p-6 rounded-xl shadow-lg mb-8">
+            <h1 class="text-3xl font-extrabold text-gray-900 mb-2">
+                PoleSync Editor: CLEAN START
+            </h1>
+            <p class="text-sm text-gray-500">
+                This is the absolute minimum code structure. It is currently running with the token you provided.
+            </p>
+        </header>
+
+        <main class="grid grid-cols-1 gap-6">
+
+            <!-- Pole List Panel -->
+            <div class="bg-white p-6 rounded-xl shadow-lg">
+                <h2 class="text-xl font-bold text-gray-800 mb-4 flex justify-between items-center">
+                    Transfer Locations
+                    <!-- GPS Button is included, but its handler will check for a token -->
+                    <button id="add-pole-btn" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-1.5 px-3 rounded-lg shadow-md flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        + Add New Pole (GPS)
+                    </button>
+                </h2>
+                
+                <div id="pole-list" class="border border-gray-200 rounded-lg divide-y divide-gray-200 min-h-[400px] max-h-[650px] overflow-y-auto">
+                    <div id="loading-message" class="text-center py-8 text-blue-500 font-medium">Loading Pole Data...</div>
+                </div>
+            </div>
+
+            <!-- Detail & Update Panel -->
+            <div class="bg-white p-6 rounded-xl shadow-lg">
+                <h2 class="text-xl font-bold text-gray-800 mb-4">Selected Pole Details</h2>
+                
+                <div id="detail-panel" class="text-gray-600">
+                    <p class="text-sm italic">Select a pole from the list to view its details and update status.</p>
+                </div>
+            </div>
+
+        </main>
+    </div>
+    
+    <script>
+        // ======================================================================
+        // === 🛑 STEP 1: CONFIGURATION 🛑 ======================================
+        // ======================================================================
+        
+        const FEATURE_LAYER_URL = "https://services7.arcgis.com/NanlOhKb0A7a7kSU/arcgis/rest/services/Pole_Transfer_System__DEV__Transfers/FeatureServer/0";
+        const STATUS_FIELD_NAME = "Status"; 
+        
+        // TOKEN provided by the user (3NKHt6i2... which failed to work in the code)
+        const USER_TOKEN = "3NKHt6i2urmWtqOuugvr9aBZiqWTKRgialUU7P61D4FafvHXw6Tewdp9yw6xew8Rm1Rz_QQCPAUDVt8z9JVLQYhDNpmyNM3FRf2GdGC_Ozkl4M9ZpNaKekjzhgC162NCXDMnDucde8Bo0TunXllHIu614nSbOr59ZeslIEJWl0QF2nuhl0F0uIVBG0BJlYTQAmpWPq8ltspELEQJRyoUpXf-MgBg2ZtyROSQKDdZXZbcP4sFl0ddriudrrnfdJeTFEcHFpgetAiD-yrukBv1fAQ_fxKRUHmBwiov81bw0kgPLEGJb5ums9MSvgQRT9eiOMisu4bt-m9OonBdklDyXw.."; 
+
+        // ======================================================================
+        // === CORE VARIABLES & UTILITIES =======================================
+        // ======================================================================
+        let poles = [];
+        let selectedPole = null;
+
+        /** Generates HTML for the colored status tag based on your custom list. */
+        const getStatusPillHTML = (status) => {
+            const statusMap = {
+                'Ready': { color: 'bg-green-600', text: 'Ready' },
+                'Blocked': { color: 'bg-red-500', text: 'Blocked' },
+                'Completed': { color: 'bg-yellow-500 text-gray-900', text: 'Completed' }
+            };
+            const { color, text } = statusMap[status] || { color: 'bg-gray-500', text: 'Unknown' };
+            
+            return `<span class="px-2 py-1 text-xs font-semibold rounded ${color}">${text}</span>`;
+        };
+
+
+     // Renders the list of pole transfers
+const renderPoleList = () => {
+    const listContainer = document.getElementById('pole-list');
+    listContainer.innerHTML = ''; 
+
+    if (poles.length === 0) {
+        listContainer.innerHTML = '<div class="text-center py-8 text-gray-500">No pole transfers found. Click the + Add New Pole button to start!</div>';
+        return;
+    }
+
+    poles.forEach(pole => {
+        // The list item declaration is correctly placed inside the loop
+        const item = document.createElement('li');
+        item.className = `pole-item p-4 flex justify-between items-center ${selectedPole && selectedPole.objectId === pole.objectId ? 'selected' : ''}`;
+        item.dataset.objectId = pole.objectId;
+
+        const status = pole.attributes[STATUS_FIELD_NAME] || "Unknown";
+        
+        // Display the custom fields instead of OBJECTID
+        const town = pole.attributes['Town'] || 'Unknown Town';
+        const road = pole.attributes['Road'] || 'Unnamed Road';
+
+        item.innerHTML = `
+            <div>
+                <span class="font-semibold text-gray-900">${town} - ${road}</span>
+            </div>
+            ${getStatusPillHTML(status)}
+        `;
+
+        item.addEventListener('click', () => handlePoleSelection(pole.objectId));
+        listContainer.appendChild(item);
+    });
+};
+        
+       // Renders the right-hand detail panel with status buttons and new fields.
+const renderDetailPanel = () => {
+    const detailPanel = document.getElementById('detail-panel');
+    
+    if (!selectedPole) {
+        detailPanel.innerHTML = '<p class="text-sm italic">Select a pole from the list to view its details and update status.</p>';
+        return;
+    }
+
+    const statusOptions = ['Ready', 'Blocked', 'Completed']; 
+    const currentStatus = selectedPole.attributes[STATUS_FIELD_NAME] || 'Unknown';
+    
+    // 🆕 Extract new fields for detail display
+    const town = selectedPole.attributes['Town'] || 'N/A';
+    const road = selectedPole.attributes['Road'] || 'N/A';
+    const latitude = selectedPole.attributes['Latitude'] || 'N/A';
+    const longitude = selectedPole.attributes['Longitude'] || 'N/A';
+    
+    // CRITICAL: Use the top-level 'objectId' for the update logic (the internal ArcGIS ID)
+    const featureObjectId = selectedPole.objectId; 
+    
+    detailPanel.innerHTML = `
+        <div class="space-y-4">
+            <h3 class="text-xl font-extrabold text-blue-600">${town} - ${road}</h3>
+            
+            <div class="p-4 bg-gray-100 rounded-lg">
+                <p class="text-xs font-medium text-gray-500 mb-1">Current Status</p>
+                ${getStatusPillHTML(currentStatus)}
+            </div>
+            
+            <div class="text-sm text-gray-700 space-y-1">
+                <p><strong>Lat/Lon:</strong> ${latitude}, ${longitude}</p>
+                <p class="text-xs text-gray-500 italic">
+                    (Internal Feature ID: ${featureObjectId})
+                </p>
+            </div>
+
+            <h4 class="text-md font-bold text-gray-800 pt-2 border-t border-gray-200">Update Status</h4>
+
+            <div id="status-buttons" class="grid grid-cols-3 gap-2">
+                </div>
+
+            <p class="text-xs text-red-500 mt-4">
+                * Update button sends data directly to your ArcGIS Feature Layer.
+            </p>
+        </div>
+    `;
+    
+    // 🚨 FIX 4: Ensure buttons use the correct featureObjectId for the update call
+    if (featureObjectId) {
+        detailPanel.querySelector('#status-buttons').innerHTML = statusOptions.map(status => {
+            let buttonColorClass = (currentStatus === status) 
+                ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                : 'bg-gray-200 hover:bg-gray-300 text-gray-800';
+
+            return `
+                <button 
+                    class="button-status p-2 text-sm font-medium rounded-lg shadow-md ${buttonColorClass}"
+                    data-status="${status}"
+                    data-objectid="${featureObjectId}" 
+                >
+                    ${status}
+                </button>
+            `;
+        }).join('');
+        
+        // Event listeners are attached here
+        detailPanel.querySelectorAll('#status-buttons button').forEach(button => {
+            button.addEventListener('click', (e) => {
+                const newStatus = e.target.dataset.status;
+                const poleObjectId = parseInt(e.target.dataset.objectid, 10);
+                if (newStatus && newStatus !== currentStatus) {
+                    handleUpdateStatus(poleObjectId, newStatus);
+                }
+            });
+        });
+    }
+};
+
+        // --- ARCGIS API FUNCTIONS ---
+        
+       // ... in queryArcGISFeatures
+	/** Queries the ArcGIS Feature Layer for all features (WILDCARD FIX). */
+const queryArcGISFeatures = async () => {
+    const queryUrl = `${FEATURE_LAYER_URL}/query`;
+    
+    // Use the wildcard '*' to request ALL fields. This bypasses the problematic field list.
+    const allOutFields = '*';
+
+    const params = new URLSearchParams({
+        where: '1=1', 
+        outFields: allOutFields, 
+        returnGeometry: 'false', 
+        f: 'json',
+    });
+    
+    if (USER_TOKEN) {
+        params.append('token', USER_TOKEN);
+    }
+
+    try {
+        const response = await fetch(`${queryUrl}?${params.toString()}`);
+        const result = await response.json();
+        
+        if (result.features) {
+            return result.features.map(f => ({
+                objectId: f.attributes.OBJECTID,
+                attributes: f.attributes,
+                geometry: null 
+            }));
+        } else if (result.error) {
+            throw new Error(result.error.message || 'ArcGIS Query Error.');
+        } else {
+            return [];
+        }
+    } catch (error) {
+        showMessageBox(`ArcGIS Query Failed:\nReason: ${error.message}`);
+        console.error("ArcGIS Query Failed:", error);
+        return [];
+    }
+};
+
+        /** Sends the update to the ArcGIS Feature Layer using applyEdits. */
+        const sendArcGISUpdate = async (objectId, newStatus) => {
+            if (!USER_TOKEN) {
+                 return { success: false, message: 'Editing requires a valid USER_TOKEN. Please update the configuration.' };
+            }
+            
+            showMessageBox(`Sending update to ArcGIS for OBJECTID ${objectId}...`);
+
+            const updateFeature = {
+                attributes: {
+                    'OBJECTID': objectId, 
+                    [STATUS_FIELD_NAME]: newStatus
+                }
+            };
+            
+            const formData = new URLSearchParams();
+            formData.append('updates', JSON.stringify([updateFeature]));
+            formData.append('f', 'json'); 
+            formData.append('token', USER_TOKEN); // Token must be sent for writing
+
+            const applyEditsUrl = `${FEATURE_LAYER_URL}/applyEdits`;
+            
+            try {
+                const response = await fetch(applyEditsUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: formData.toString()
+                });
+
+                const result = await response.json();
+
+                if (result.updateResults && result.updateResults.length > 0 && result.updateResults[0].success) {
+                    return { success: true, message: `Update successful (ID: ${objectId}).` };
+                } else {
+                    const errorMsg = result.updateResults && result.updateResults.length > 0 && result.updateResults[0].error 
+                        ? result.updateResults[0].error.description 
+                        : 'Unknown update error.';
+                    return { success: false, message: `ArcGIS Error: ${errorMsg}` };
+                }
+
+            } catch (error) {
+                return { success: false, message: `Network Error: ${error.message}` };
+            }
+        };
+        
+        /** Sends a request to add a new feature (pole) to the ArcGIS layer. */
+        const sendArcGISAdd = async (lat, lng) => {
+            if (!USER_TOKEN) {
+                 return { success: false, message: 'Adding a pole requires a valid USER_TOKEN. Please update the configuration.' };
+            }
+            showMessageBox(`Attempting to add new pole...`);
+            
+            const newFeature = {
+                geometry: {
+                    x: lng, 
+                    y: lat, 
+                    spatialReference: { wkid: 4326 } 
+                },
+                attributes: {
+                    [STATUS_FIELD_NAME]: 'Ready', // Default status for new poles
+                }
+            };
+
+            const formData = new URLSearchParams();
+            formData.append('adds', JSON.stringify([newFeature]));
+            formData.append('f', 'json');
+            formData.append('token', USER_TOKEN); // Token must be sent for writing
+
+            const applyEditsUrl = `${FEATURE_LAYER_URL}/applyEdits`;
+            
+            try {
+                const response = await fetch(applyEditsUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: formData.toString()
+                });
+
+                const result = await response.json();
+
+                if (result.addResults && result.addResults.length > 0 && result.addResults[0].success) {
+                    const newObjectId = result.addResults[0].objectId;
+                    return { success: true, message: `New pole added successfully.`, objectId: newObjectId };
+                } else {
+                    const errorMsg = result.addResults && result.addResults.length > 0 && result.addResults[0].error
+                        ? result.addResults[0].error.description
+                        : 'Unknown add error. Check Feature Layer settings.';
+                    return { success: false, message: `ArcGIS Error: ${errorMsg}` };
+                }
+
+            } catch (error) {
+                return { success: false, message: `Network Error: ${error.message}` };
+            }
+        };
+        
+        // --- HANDLERS ---
+
+        const handleUpdateStatus = async (objectId, newStatus) => {
+            const result = await sendArcGISUpdate(objectId, newStatus);
+
+            if (result.success) {
+                // Find the pole and update its status locally for a quick response
+                const poleIndex = poles.findIndex(p => p.objectId === objectId);
+                
+                if (poleIndex !== -1) {
+                    const updatedPoles = [...poles];
+                    updatedPoles[poleIndex].attributes[STATUS_FIELD_NAME] = newStatus;
+                    
+                    poles = updatedPoles;
+                    selectedPole = updatedPoles[poleIndex];
+                    
+                    renderPoleList();
+                    renderDetailPanel();
+                }
+                
+                showMessageBox(`SUCCESS: ${result.message}\nStatus updated to: ${newStatus}`);
+
+            } else {
+                showMessageBox(`FAILED to update pole ${objectId}.\nReason: ${result.message}`);
+            }
+        };
+
+        const handlePoleSelection = (objectId) => {
+            const newSelection = poles.find(p => p.objectId === objectId);
+            
+            if (newSelection) {
+                selectedPole = newSelection;
+                renderPoleList(); 
+                renderDetailPanel();
+            }
+        };
+        
+        /** Gets GPS and calls the add function. */
+        const handleAddNewPole = async () => {
+            if (!USER_TOKEN) {
+                 showMessageBox('To add a new pole, you must paste a valid ArcGIS token into the USER_TOKEN variable.');
+                 return;
+            }
+
+            showMessageBox("Getting current GPS location...");
+            
+            if (!navigator.geolocation) {
+                showMessageBox("Geolocation is not supported by your browser. Cannot add pole by GPS.");
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(async (position) => {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                
+                showMessageBox(`Location found: Lat ${lat.toFixed(6)}, Lon ${lng.toFixed(6)}. Preparing to add pole...`);
+                
+                const result = await sendArcGISAdd(lat, lng);
+                
+                if (result.success) {
+                    await initializeApp(); 
+                    const newPole = poles.find(p => p.objectId === result.objectId);
+                    if (newPole) {
+                        handlePoleSelection(newPole.objectId);
+                    }
+                    showMessageBox(`SUCCESS: New pole added at your location!`);
+                } else {
+                    showMessageBox(`FAILED to add new pole.\nReason: ${result.message}`);
+                }
+
+            }, (error) => {
+                showMessageBox(`GPS Error: ${error.message}\nEnsure location services are enabled for your browser.`);
+                console.error("Geolocation Error:", error);
+            });
+        };
+        
+        const showMessageBox = (message) => {
+            const dialog = document.createElement('div');
+            dialog.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50';
+            dialog.innerHTML = `
+                <div class="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full">
+                    <p class="mb-4 text-gray-800 whitespace-pre-wrap">${message}</p>
+                    <button onclick="this.parentNode.parentNode.remove()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors">
+                        Close
+                    </button>
+                </div>
+            `;
+            document.body.appendChild(dialog);
+        };
+
+        // --- INITIALIZATION ---
+
+        const initializeApp = async () => {
+            document.getElementById('loading-message').textContent = 'Querying ArcGIS Feature Layer...';
+
+            const features = await queryArcGISFeatures();
+            
+            poles = features; 
+            
+            const loadingMessage = document.getElementById('loading-message');
+            if (loadingMessage) loadingMessage.remove(); 
+            
+            renderPoleList();
+            renderDetailPanel();
+
+            if (poles.length === 0) {
+                // If the query failed, show the user the status
+                if (document.querySelector('.fixed.inset-0')) {
+                    // Message box is already showing the error
+                } else {
+                    showMessageBox("No data loaded. If you see 'Token Required' in the console, please update the USER_TOKEN variable.");
+                }
+            }
+            
+            document.getElementById('add-pole-btn').addEventListener('click', handleAddNewPole);
+        };
+
+        window.onload = initializeApp;
+    </script>
+
+</body>
+</html>
