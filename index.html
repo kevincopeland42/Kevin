@@ -328,12 +328,18 @@
                 esriModulePromise.resolve({ Query, FeatureLayer, locator });
 
                 if (USER_TOKEN) {
+                    const arcgisDomainPattern = /(services7\.arcgis\.com|arcgis\.com|arcgisonline\.com|geocode-api\.arcgis\.com)/i;
                     esriConfig.request.interceptors.push({
-                        urls: /arcgis.com/,
+                        urls: arcgisDomainPattern,
                         before: (params) => {
                             params.requestOptions.query = params.requestOptions.query || {};
                             if (!params.requestOptions.query.token) {
                                 params.requestOptions.query.token = USER_TOKEN;
+                            }
+
+                            const body = params.requestOptions.body;
+                            if (body instanceof FormData && !body.has('token')) {
+                                body.append('token', USER_TOKEN);
                             }
                         }
                     });
@@ -377,7 +383,3 @@
 </body>
 
 </html>
-
-
-
-
