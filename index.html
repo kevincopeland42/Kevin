@@ -4,13 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DirectSync Web Editor</title>
+
+    <!-- Tailwind (fine for dev even if it warns) -->
     <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- ArcGIS -->
     <link rel="stylesheet" href="https://js.arcgis.com/4.29/esri/themes/light/main.css" />
     <script src="https://js.arcgis.com/4.29/"></script>
+
     <style>
         .font-sans { font-family: 'Inter', sans-serif; }
     </style>
 </head>
+
 <body class="min-h-screen bg-gray-50 font-sans p-4 sm:p-8">
 
     <div class="max-w-6xl mx-auto space-y-4">
@@ -20,10 +26,15 @@
                     <h1 class="text-3xl font-extrabold text-gray-900">DirectSync Web Editor</h1>
                     <p class="text-sm text-gray-500">Map-first view for managing poles.</p>
                 </div>
+
                 <div class="flex gap-2 flex-wrap justify-end">
                     <button id="my-location-btn" class="bg-white border border-blue-200 text-blue-700 hover:bg-blue-50 text-sm font-semibold py-2 px-3 rounded-lg shadow-sm">My Location</button>
+
                     <button id="add-pole-btn" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 px-3 rounded-lg shadow-md flex items-center gap-2">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
                         Add New Pole (GPS)
                     </button>
                 </div>
@@ -32,9 +43,11 @@
 
         <div class="bg-white p-6 rounded-xl shadow-lg space-y-4">
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+
                 <div class="flex items-center gap-2 flex-wrap">
-                    <label for="layer-select" class="text-sm font-semibold text-gray-700">Layer</label>
-                    <select id="layer-select" class="border border-gray-300 rounded-lg px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <label class="text-sm font-semibold text-gray-700">Layer</label>
+                    <select id="layer-select"
+                       class="border border-gray-300 rounded-lg px-3 py-2 text-sm shadow-sm focus:ring-blue-500">
                         <option value="transfer">Transfer</option>
                         <option value="maintenance">Maintenance</option>
                     </select>
@@ -42,64 +55,58 @@
 
                 <div class="flex-1 flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-3">
                     <div class="flex flex-1 gap-2">
-                        <input id="search-input" type="text" placeholder="Search by pole number or address" class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                        <button id="search-btn" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 px-3 rounded-lg shadow-md">Search</button>
+                        <input id="search-input"
+                            placeholder="Search by pole number or address"
+                            class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                        <button id="search-btn"
+                            class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 px-3 rounded-lg shadow-md">
+                            Search
+                        </button>
                     </div>
-                    <p class="text-xs text-gray-500">Status colors: Ready (green), Blocked (red), Completed (yellow), Unknown (gray)</p>
                 </div>
             </div>
 
-            <div class="w-full h-[70vh] rounded-xl overflow-hidden border border-gray-200" id="map-view"></div>
+            <div id="map-view" class="w-full h-[70vh] rounded-xl border border-gray-200"></div>
         </div>
     </div>
 
+
+    <!-- =============================== -->
+    <!--           JAVASCRIPT            -->
+    <!-- =============================== -->
+
     <script>
-        const FEATURE_LAYER_URL = "https://services7.arcgis.com/NanlOhKb0A7a7kSU/arcgis/rest/services/Pole_Transfer_System__DEV__Transfers/FeatureServer/0";
-        const MAINTENANCE_FEATURE_LAYER_URL = ""; // Placeholder for future maintenance layer
+        const FEATURE_LAYER_URL =
+            "https://services7.arcgis.com/NanlOhKb0A7a7kSU/arcgis/rest/services/Pole_Transfer_System__DEV__Transfers/FeatureServer/0";
+
+        const MAINTENANCE_FEATURE_LAYER_URL = ""; // future
+
         const STATUS_FIELD_NAME = "Status";
         const POLE_NUMBER_FIELD = "PoleNumber";
-        const GEOCODER_URL = "https://geocode-api.arcgis.com/arcgis/rest/services/World/GeocodeServer";
-        const USER_TOKEN = "3NKHt6i2urmWtqOuugvr9aBZiqWTKRgialUU7P61D4FafvHXw6Tewdp9yw6xew8Rm1Rz_QQCPAUDVt8z9JVLQUL9IM_L3Dbhbsiu89Qs7ujMEqFkeWxoR0kGsuRItEqT2e_bW12oAjHl8gD0pOtZvCh7ejZb4svcKZNPBJN3b0sKKJLlHeuqNVj8Jyvp69CqKiN9vSeqGKz9psRCuR2wMHxQk1YqD2yf2KV6axhbfseS_Qfic3gigYml1ZMNIDicRNdXMzoL7__qmwYv5kZfMdAWBxOguxiitm4OGfYqvGJHshUYtYzQNTXDQCiIfMM_UxTeWerZiVd6p5hAF_DZHw";
 
-        let map = null;
-        let view = null;
-        let activeLayer = null;
-        let layerView = null;
+        const GEOCODER_URL =
+            "https://geocode-api.arcgis.com/arcgis/rest/services/World/GeocodeServer";
 
-        const statusRenderer = {
-            type: "unique-value",
-            field: STATUS_FIELD_NAME,
-            defaultSymbol: {
-                type: "simple-marker",
-                color: "#6b7280",
-                outline: { color: "#ffffff", width: 1 }
-            },
-            uniqueValueInfos: [
-                {
-                    value: "Ready",
-                    symbol: { type: "simple-marker", color: "#16a34a", outline: { color: "#ffffff", width: 1 } },
-                    label: "Ready"
-                },
-                {
-                    value: "Blocked",
-                    symbol: { type: "simple-marker", color: "#dc2626", outline: { color: "#ffffff", width: 1 } },
-                    label: "Blocked"
-                },
-                {
-                    value: "Completed",
-                    symbol: { type: "simple-marker", color: "#eab308", outline: { color: "#ffffff", width: 1 } },
-                    label: "Completed"
-                }
-            ]
-        };
+        const USER_TOKEN =
+            "YOUR TOKEN HERE"; // replace your hacked token
 
+        let map, view, activeLayer;
+
+
+        /* -----------------------------
+           Message Box Helper
+        ------------------------------ */
         const showMessageBox = (message) => {
-            const dialog = document.createElement('div');
-            dialog.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50';
+            const dialog = document.createElement("div");
+            dialog.className =
+                "fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50";
+
             dialog.innerHTML = `
                 <div class="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full">
                     <p class="mb-4 text-gray-800 whitespace-pre-wrap">${message}</p>
-                    <button onclick="this.parentNode.parentNode.remove()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors">
+                    <button onclick="this.parentNode.parentNode.remove()"
+                        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
                         Close
                     </button>
                 </div>
@@ -107,273 +114,256 @@
             document.body.appendChild(dialog);
         };
 
-        const getPopupActions = () => ([
-            { title: "Set Ready", id: "set-ready", className: "esri-icon-check-mark" },
-            { title: "Set Blocked", id: "set-blocked", className: "esri-icon-close" },
-            { title: "Set Completed", id: "set-completed", className: "esri-icon-checkbox-checked" }
-        ]);
 
-        const popupContent = (feature) => {
-            const attributes = feature.graphic.attributes || {};
-            const town = attributes['Town'] || 'N/A';
-            const road = attributes['Road'] || 'N/A';
-            const latitude = attributes['Latitude'] || 'N/A';
-            const longitude = attributes['Longitude'] || 'N/A';
-            const status = attributes[STATUS_FIELD_NAME] || 'Unknown';
+        /* -----------------------------
+           Initialize ArcGIS Map
+        ------------------------------ */
+        function initializeMap() {
+            require(
+                [
+                    "esri/config",
+                    "esri/Map",
+                    "esri/views/MapView",
+                    "esri/layers/FeatureLayer",
+                    "esri/rest/support/Query",
+                    "esri/rest/locator"
+                ],
+                function (esriConfig, Map, MapView, FeatureLayer, Query, locator) {
 
-            return `
-                <div class="space-y-2 text-sm">
-                    <div class="font-semibold text-gray-900">${town} - ${road}</div>
-                    <div><strong>Status:</strong> ${status}</div>
-                    <div><strong>Lat/Lon:</strong> ${latitude}, ${longitude}</div>
-                    <p class="text-xs text-gray-500">Use the popup actions to change status.</p>
-                </div>
-            `;
-        };
+                    /* Inject token for ALL ArcGIS requests */
+                    if (USER_TOKEN) {
+                        esriConfig.request.interceptors.push({
+                            urls: /(arcgis\.com|services7\.arcgis\.com|geocode-api\.arcgis\.com)/i,
+                            before: (params) => {
+                                params.requestOptions.query = params.requestOptions.query || {};
+                                if (!params.requestOptions.query.token) {
+                                    params.requestOptions.query.token = USER_TOKEN;
+                                }
+                            }
+                        });
+                    }
 
-        const updateStatusOnLayer = async (objectId, newStatus) => {
-            if (!activeLayer) return;
-            try {
-                const result = await activeLayer.applyEdits({
-                    updateFeatures: [{
-                        attributes: {
-                            OBJECTID: objectId,
-                            [STATUS_FIELD_NAME]: newStatus
-                        }
-                    }]
-                });
+                    map = new Map({
+                        basemap: "streets-navigation-vector"
+                    });
 
-                const success = result.updateFeatureResults?.[0]?.success;
-                if (success) {
-                    showMessageBox(`SUCCESS: Status updated to ${newStatus}.`);
-                    activeLayer.refresh();
-                } else {
-                    const error = result.updateFeatureResults?.[0]?.error?.description || 'Unknown update error.';
-                    showMessageBox(`FAILED to update pole ${objectId}.\nReason: ${error}`);
+                    view = new MapView({
+                        container: "map-view",
+                        map,
+                        center: [-71.0589, 42.3601], // Boston default
+                        zoom: 12
+                    });
+
+                    /* Load initial layer */
+                    setActiveLayer("transfer", FeatureLayer, Query, locator);
+
+                    /* ADD POPUP EVENT LISTENER THE RIGHT WAY */
+                    view.when(() => {
+                        view.popup.on("trigger-action", handlePopupAction);
+                    });
+
+                    /* UI Events */
+                    document.getElementById("layer-select")
+                        .addEventListener("change", (e) =>
+                            setActiveLayer(e.target.value, FeatureLayer, Query, locator)
+                        );
+
+                    document.getElementById("my-location-btn")
+                        .addEventListener("click", geolocate);
+
+                    document.getElementById("add-pole-btn")
+                        .addEventListener("click", () => addNewPole(locator));
+
+                    document.getElementById("search-btn")
+                        .addEventListener("click", () =>
+                            runSearch(Query, locator)
+                        );
+
+                    document.getElementById("search-input")
+                        .addEventListener("keydown", (e) => {
+                            if (e.key === "Enter") runSearch(Query, locator);
+                        });
                 }
-            } catch (error) {
-                showMessageBox(`Network Error: ${error.message}`);
-            }
-        };
+            );
+        }
 
-        const addNewPoleAtLocation = async (lat, lng) => {
-            if (!activeLayer) return;
-            try {
-                const result = await activeLayer.applyEdits({
-                    addFeatures: [{
-                        geometry: { type: "point", longitude: lng, latitude: lat },
-                        attributes: { [STATUS_FIELD_NAME]: 'Ready' }
-                    }]
-                });
 
-                const addResult = result.addFeatureResults?.[0];
-                if (addResult?.success) {
-                    const newId = addResult.objectId;
-                    showMessageBox('SUCCESS: New pole added at your location!');
-                    activeLayer.refresh();
-                    zoomToFeatureById(newId);
-                } else {
-                    const error = addResult?.error?.description || 'Unknown add error. Check Feature Layer settings.';
-                    showMessageBox(`FAILED to add new pole.\nReason: ${error}`);
-                }
-            } catch (error) {
-                showMessageBox(`Network Error: ${error.message}`);
-            }
-        };
-
-        const zoomToFeatureById = async (objectId) => {
-            if (!activeLayer) return;
-            const { Query } = await esriModulePromise;
-            const query = new Query({
-                objectIds: [objectId],
-                outFields: ["*"],
-                returnGeometry: true
-            });
-            const result = await activeLayer.queryFeatures(query);
-            if (result.features.length > 0) {
-                const feature = result.features[0];
-                view.goTo({ target: feature.geometry, zoom: 17 });
-                view.popup.open({ features: [feature], location: feature.geometry });
-            }
-        };
-
-        const geolocate = () => {
-            if (!navigator.geolocation) {
-                showMessageBox('Geolocation is not supported by your browser.');
-                return;
-            }
-            navigator.geolocation.getCurrentPosition((position) => {
-                const lat = position.coords.latitude;
-                const lng = position.coords.longitude;
-                view.goTo({ center: [lng, lat], zoom: 15 });
-            }, (error) => {
-                showMessageBox(`GPS Error: ${error.message}\nEnsure location services are enabled for your browser.`);
-                console.error('Geolocation Error:', error);
-            });
-        };
-
-        const handleAddNewPole = () => {
-            if (!USER_TOKEN) {
-                showMessageBox('To add a new pole, you must paste a valid ArcGIS token into the USER_TOKEN variable.');
-                return;
-            }
-            if (!navigator.geolocation) {
-                showMessageBox('Geolocation is not supported by your browser. Cannot add pole by GPS.');
-                return;
-            }
-            showMessageBox('Getting current GPS location...');
-            navigator.geolocation.getCurrentPosition(async (position) => {
-                const lat = position.coords.latitude;
-                const lng = position.coords.longitude;
-                addNewPoleAtLocation(lat, lng);
-            }, (error) => {
-                showMessageBox(`GPS Error: ${error.message}\nEnsure location services are enabled for your browser.`);
-                console.error('Geolocation Error:', error);
-            });
-        };
-
-        const handlePopupAction = (event) => {
-            const feature = view.popup.selectedFeature;
-            if (!feature) return;
-            const objectId = feature.attributes?.OBJECTID;
-            if (!objectId) return;
-
-            if (event.action.id === 'set-ready') {
-                updateStatusOnLayer(objectId, 'Ready');
-            } else if (event.action.id === 'set-blocked') {
-                updateStatusOnLayer(objectId, 'Blocked');
-            } else if (event.action.id === 'set-completed') {
-                updateStatusOnLayer(objectId, 'Completed');
-            }
-        };
-
-        const setActiveLayer = async (layerKey) => {
-            if (!map) return;
-            const { FeatureLayer } = await esriModulePromise;
-            if (activeLayer) {
-                map.remove(activeLayer);
-                activeLayer.destroy();
-                activeLayer = null;
-            }
-
-            const url = layerKey === 'maintenance' ? MAINTENANCE_FEATURE_LAYER_URL : FEATURE_LAYER_URL;
+        /* -----------------------------
+           SET ACTIVE LAYER
+        ------------------------------ */
+        function setActiveLayer(layerKey, FeatureLayer) {
+            const url =
+                layerKey === "maintenance"
+                    ? MAINTENANCE_FEATURE_LAYER_URL
+                    : FEATURE_LAYER_URL;
 
             if (!url) {
-                showMessageBox('No URL configured for this layer. Please update the MAINTENANCE_FEATURE_LAYER_URL value.');
+                showMessageBox("Maintenance layer URL not configured.");
                 return;
+            }
+
+            if (activeLayer) {
+                map.remove(activeLayer);
             }
 
             activeLayer = new FeatureLayer({
                 url,
-                outFields: ['*'],
-                renderer: statusRenderer,
+                outFields: ["*"],
+                renderer: {
+                    type: "unique-value",
+                    field: STATUS_FIELD_NAME,
+                    uniqueValueInfos: [
+                        { value: "Ready", symbol: marker("#16a34a") },
+                        { value: "Blocked", symbol: marker("#dc2626") },
+                        { value: "Completed", symbol: marker("#eab308") }
+                    ],
+                    defaultSymbol: marker("#6b7280")
+                },
                 popupTemplate: {
-                    title: '{Town} - {Road}',
+                    title: "{Town} - {Road}",
                     content: popupContent,
-                    actions: getPopupActions()
+                    actions: [
+                        { title: "Set Ready", id: "set-ready", className: "esri-icon-check-mark" },
+                        { title: "Set Blocked", id: "set-blocked", className: "esri-icon-close" },
+                        { title: "Set Completed", id: "set-completed", className: "esri-icon-checkbox-checked" }
+                    ]
                 }
             });
 
             map.add(activeLayer);
-            view.whenLayerView(activeLayer).then((lv) => {
-                layerView = lv;
-            });
-        };
+        }
 
-        const handleSearch = async () => {
-            if (!activeLayer) return;
-            const searchValue = document.getElementById('search-input').value.trim();
-            if (!searchValue) return;
-            const { Query, locator } = await esriModulePromise;
 
-            const looksNumeric = /^\d+$/.test(searchValue);
+        /* -----------------------------
+           POPUP CONTENT
+        ------------------------------ */
+        function popupContent(feature) {
+            const a = feature.graphic.attributes;
+            return `
+                <div class="space-y-2 text-sm">
+                    <div class="font-semibold text-gray-900">
+                        ${(a.Town || "N/A")} - ${(a.Road || "N/A")}
+                    </div>
+                    <div><strong>Status:</strong> ${a[STATUS_FIELD_NAME]}</div>
+                    <div><strong>Lat/Lon:</strong> ${a.Latitude}, ${a.Longitude}</div>
+                    <p class="text-xs text-gray-500">Use actions below to update status.</p>
+                </div>
+            `;
+        }
 
-            if (looksNumeric) {
-                const query = new Query({
-                    where: `${POLE_NUMBER_FIELD} = '${searchValue}'`,
-                    outFields: ['*'],
-                    returnGeometry: true
-                });
-                const result = await activeLayer.queryFeatures(query);
-                if (result.features.length > 0) {
-                    const feature = result.features[0];
-                    view.goTo({ target: feature.geometry, zoom: 17 });
-                    view.popup.open({ features: [feature], location: feature.geometry });
-                } else {
-                    showMessageBox('No pole found with that number.');
-                }
-            } else {
-                locator.addressToLocations(GEOCODER_URL, { address: { SingleLine: searchValue }, maxLocations: 1 })
-                    .then((response) => {
-                        if (response.length > 0) {
-                            const location = response[0].location;
-                            view.goTo({ target: location, zoom: 15 });
-                        } else {
-                            showMessageBox('Address not found.');
+
+        /* -----------------------------
+           MARKER SYMBOL HELPER
+        ------------------------------ */
+        function marker(color) {
+            return {
+                type: "simple-marker",
+                color,
+                outline: { color: "white", width: 1 }
+            };
+        }
+
+
+        /* -----------------------------
+           POPUP ACTION HANDLER
+        ------------------------------ */
+        function handlePopupAction(event) {
+            const f = view.popup.selectedFeature;
+            if (!f) return;
+
+            const id = f.attributes.OBJECTID;
+            if (!id) return;
+
+            let newStatus = null;
+            if (event.action.id === "set-ready") newStatus = "Ready";
+            if (event.action.id === "set-blocked") newStatus = "Blocked";
+            if (event.action.id === "set-completed") newStatus = "Completed";
+
+            if (newStatus) {
+                activeLayer.applyEdits({
+                    updateFeatures: [{
+                        attributes: {
+                            OBJECTID: id,
+                            [STATUS_FIELD_NAME]: newStatus
                         }
-                    })
-                    .catch((error) => showMessageBox(`Geocode error: ${error.message}`));
-            }
-        };
-
-        const initializeMap = async () => {
-            require([
-                'esri/config',
-                'esri/Map',
-                'esri/views/MapView',
-                'esri/layers/FeatureLayer',
-                'esri/rest/support/Query',
-                'esri/rest/locator'
-            ], (esriConfig, Map, MapView, FeatureLayer, Query, locator) => {
-                esriModulePromise.resolve({ Query, FeatureLayer, locator });
-
-                if (USER_TOKEN) {
-                    esriConfig.request.interceptors.push({
-                        urls: /(services7\.arcgis\.com|\.arcgis\.com|\.arcgisonline\.com|geocode-api\.arcgis\.com)/i,
-                        before: (params) => {
-                            params.requestOptions.query = params.requestOptions.query || {};
-                            if (!params.requestOptions.query.token) {
-                                params.requestOptions.query.token = USER_TOKEN;
-                            }
-                        }
-                    });
-                }
-
-                map = new Map({ basemap: 'streets-navigation-vector' });
-                view = new MapView({
-                    container: 'map-view',
-                    map,
-                    center: [-71.0589, 42.3601],
-                    zoom: 12,
-                    popup: {
-                        dockEnabled: true,
-                        dockOptions: { buttonEnabled: false, breakpoint: false }
+                    }]
+                }).then(result => {
+                    if (result.updateFeatureResults[0].success) {
+                        showMessageBox(`Status updated to ${newStatus}`);
+                        activeLayer.refresh();
+                    } else {
+                        showMessageBox("Edit failed: " + result.updateFeatureResults[0].error.description);
                     }
                 });
+            }
+        }
 
-                setActiveLayer('transfer');
 
-                view.on("popup-trigger-action", handlePopupAction);
-                document.getElementById('layer-select').addEventListener('change', (e) => setActiveLayer(e.target.value));
-                document.getElementById('my-location-btn').addEventListener('click', geolocate);
-                document.getElementById('add-pole-btn').addEventListener('click', handleAddNewPole);
-                document.getElementById('search-btn').addEventListener('click', handleSearch);
-                document.getElementById('search-input').addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter') handleSearch();
+        /* -----------------------------
+           GEOLOCATE
+        ------------------------------ */
+        function geolocate() {
+            if (!navigator.geolocation)
+                return showMessageBox("Browser does not support geolocation.");
+
+            navigator.geolocation.getCurrentPosition(
+                pos => {
+                    const { latitude, longitude } = pos.coords;
+                    view.goTo({ center: [longitude, latitude], zoom: 15 });
+                },
+                err => showMessageBox("GPS Error: " + err.message)
+            );
+        }
+
+
+        /* -----------------------------
+           SEARCH
+        ------------------------------ */
+        function runSearch(Query, locator) {
+            const text = document.getElementById("search-input").value.trim();
+            if (!text) return;
+
+            const numeric = /^\d+$/.test(text);
+
+            if (numeric) {
+                const q = new Query({
+                    where: `${POLE_NUMBER_FIELD} = '${text}'`,
+                    outFields: ["*"],
+                    returnGeometry: true
                 });
-            });
-        };
 
-        const esriModulePromise = (() => {
-            let resolveFn;
-            const promise = new Promise((resolve) => { resolveFn = resolve; });
-            promise.resolve = resolveFn;
-            return promise;
-        })();
+                activeLayer.queryFeatures(q).then(res => {
+                    if (res.features.length === 0)
+                        return showMessageBox("Pole not found.");
 
+                    const f = res.features[0];
+                    view.goTo({ target: f.geometry, zoom: 18 });
+                    view.popup.open({ features: [f], location: f.geometry });
+                });
+
+            } else {
+                locator.addressToLocations(GEOCODER_URL, {
+                    address: { SingleLine: text },
+                    maxLocations: 1
+                }).then(res => {
+                    if (res.length === 0)
+                        return showMessageBox("Address not found.");
+
+                    view.goTo({ target: res[0].location, zoom: 15 });
+                });
+            }
+        }
+
+
+        /* -----------------------------
+           START THE MAP
+        ------------------------------ */
         window.onload = initializeMap;
+
     </script>
 
 </body>
+</html>
 
 </html>
+
