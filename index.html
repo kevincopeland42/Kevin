@@ -328,40 +328,43 @@
                 const info = new OAuthInfo({
                     portalUrl: 'https://www.arcgis.com',
                     appId: 'c6dKp7cbBFCn4m8k',
-                    popup: true,
-                    popupCallbackUrl: 'https://kevincopeland42.github.io/Kevin/oauth2/callback.html'
+                    popup: false,
+                    redirectUri: 'https://kevincopeland42.github.io/Kevin/'
                 });
 
                 IdentityManager.registerOAuthInfos([info]);
 
-                IdentityManager.getCredential(`${info.portalUrl}/sharing`).then(() => {
-                    map = new Map({ basemap: 'streets-navigation-vector' });
-                    view = new MapView({
-                        container: 'map-view',
-                        map,
-                        center: [-71.0589, 42.3601],
-                        zoom: 12,
-                        popup: {
-                            dockEnabled: true,
-                            dockOptions: { buttonEnabled: false, breakpoint: false }
-                        }
-                    });
+                IdentityManager.checkSignInStatus(`${info.portalUrl}/sharing`)
+                    .catch(() => IdentityManager.getCredential(`${info.portalUrl}/sharing`))
+                    .then(() => {
+                        map = new Map({ basemap: 'streets-navigation-vector' });
+                        view = new MapView({
+                            container: 'map-view',
+                            map,
+                            center: [-71.0589, 42.3601],
+                            zoom: 12,
+                            popup: {
+                                dockEnabled: true,
+                                dockOptions: { buttonEnabled: false, breakpoint: false }
+                            }
+                        });
 
-                    setActiveLayer('transfer');
+                        setActiveLayer('transfer');
 
-                    reactiveUtils.when(() => view.popup, () => {
-                        view.popup.on('trigger-action', handlePopupAction);
+                        reactiveUtils.when(() => view.popup, () => {
+                            view.popup.on('trigger-action', handlePopupAction);
+                        });
+                        document.getElementById('layer-select').addEventListener('change', (e) => setActiveLayer(e.target.value));
+                        document.getElementById('my-location-btn').addEventListener('click', geolocate);
+                        document.getElementById('add-pole-btn').addEventListener('click', handleAddNewPole);
+                        document.getElementById('search-btn').addEventListener('click', handleSearch);
+                        document.getElementById('search-input').addEventListener('keydown', (e) => {
+                            if (e.key === 'Enter') handleSearch();
+                        });
+                    })
+                    .catch((error) => {
+                        showMessageBox(`Authentication failed: ${error.message}`);
                     });
-                    document.getElementById('layer-select').addEventListener('change', (e) => setActiveLayer(e.target.value));
-                    document.getElementById('my-location-btn').addEventListener('click', geolocate);
-                    document.getElementById('add-pole-btn').addEventListener('click', handleAddNewPole);
-                    document.getElementById('search-btn').addEventListener('click', handleSearch);
-                    document.getElementById('search-input').addEventListener('keydown', (e) => {
-                        if (e.key === 'Enter') handleSearch();
-                    });
-                }).catch((error) => {
-                    showMessageBox(`Authentication failed: ${error.message}`);
-                });
             });
         };
 
@@ -378,4 +381,3 @@
 </body>
 
 </html>
-
