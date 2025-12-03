@@ -262,8 +262,14 @@
             try {
                 const result = await activeLayer.applyEdits(payload);
                 logApplyEditsResponse(result);
-                const updateResult = result.updateFeatureResults?.[0];
-                const success = updateResult?.success;
+                const updateResults = result.updateResults || result.updateFeatureResults;
+                const updateResult = updateResults?.[0];
+                const success = updateResult?.success === true;
+                console.info('[ArcGIS][Update] Result success flags', {
+                    updateResults: result.updateResults,
+                    updateFeatureResults: result.updateFeatureResults,
+                    firstSuccess: updateResult?.success
+                });
                 if (success) {
                     showMessageBox(`SUCCESS: Status updated to ${validated}.`);
                     activeLayer.refresh();
@@ -273,7 +279,7 @@
                 }
             } catch (error) {
                 logApplyEditsResponse(error);
-                const message = surfaceArcGISError(error, `Network Error: ${error.message}`);
+                const message = surfaceArcGISError(error, `Network or applyEdits Error: ${error.message}`);
                 showMessageBox(message);
             }
         };
