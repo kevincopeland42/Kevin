@@ -59,7 +59,7 @@
         const STATUS_FIELD_NAME = "Status";
         const POLE_NUMBER_FIELD = "PoleNumber";
         const GEOCODER_URL = "https://geocode-api.arcgis.com/arcgis/rest/services/World/GeocodeServer";
-        const USER_TOKEN = "3NKHt6i2urmWtqOuugvr9aBZiqWTKRgialUU7P61D4FafvHXw6Tewdp9yw6xew8Rm1Rz_QQCPAUDVt8z9JVLQUL9IM_L3Dbhbsiu89Qs7ugkzfBX1lVvq7r3DPPjCSRL073hrRaBqpZmx5vkflj4054v4419beOvA6GQtq-9ho8W0yUTSnnjNFdGBQLuj-8wOMUtZY5YgnDWlI3H18YdDTs0dIcikqxHe2E6btF-bCohIhyl7LuES5K-P1oCardhZAco1wNJbxOJ5TZ2JdiHvA..";
+        const USER_TOKEN = "3NKHt6i2urmWtqOuugvr9aBZiqWTKRgialUU7P61D4FafvHXw6Tewdp9yw6xew8Rm1Rz_QQCPAUDVt8z9JVLQUL9IM_L3Dbhbsiu89Qs7ujMEqFkeWxoR0kGsuRItEqT2e_bW12oAjHl8gD0pOtZvCh7ejZb4svcKZNPBJN3b0sKKJLlHeuqNVj8Jyvp69CqKiN9vSeqGKz9psRCuR2wMHxQk1YqD2yf2KV6axhbfseS_Qfic3gigYml1ZMNIDicRNdXMzoL7__qmwYv5kZfMdAWBxOguxiitm4OGfYqvGJHshUYtYzQNTXDQCiIfMM_UxTeWerZiVd6p5hAF_DZHw";
 
         let map = null;
         let view = null;
@@ -325,8 +325,9 @@
                 'esri/views/MapView',
                 'esri/layers/FeatureLayer',
                 'esri/rest/support/Query',
-                'esri/rest/locator'
-            ], (esriConfig, Map, MapView, FeatureLayer, Query, locator) => {
+                'esri/rest/locator',
+                'esri/core/reactiveUtils'
+            ], (esriConfig, Map, MapView, FeatureLayer, Query, locator, reactiveUtils) => {
                 esriModulePromise.resolve({ Query, FeatureLayer, locator });
 
                 if (USER_TOKEN) {
@@ -358,7 +359,7 @@
                     });
                 }
 
-                map = new Map({ basemap: 'osm' });
+                map = new Map({ basemap: 'streets-navigation-vector' });
                 view = new MapView({
                     container: 'map-view',
                     map,
@@ -372,7 +373,9 @@
 
                 setActiveLayer('transfer');
 
-                view.on("trigger-action", handlePopupAction);
+                reactiveUtils.when(() => view.popup, () => {
+                    view.popup.on('trigger-action', handlePopupAction);
+                });
                 document.getElementById('layer-select').addEventListener('change', (e) => setActiveLayer(e.target.value));
                 document.getElementById('my-location-btn').addEventListener('click', geolocate);
                 document.getElementById('add-pole-btn').addEventListener('click', handleAddNewPole);
@@ -396,6 +399,7 @@
 </body>
 
 </html>
+
 
 
 
