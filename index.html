@@ -262,14 +262,14 @@
             try {
                 const result = await activeLayer.applyEdits(payload);
                 logApplyEditsResponse(result);
-                const updateResult =
-                    (result.updateResults && result.updateResults[0]) ||
-                    (result.updateFeatureResults && result.updateFeatureResults[0]) ||
-                    null;
+                const updateResults =
+                    result.updateFeatureResults ||
+                    result.updateResults ||
+                    [];
 
-                const success =
-                    updateResult?.success === true ||
-                    (updateResult && updateResult.error === null);
+                const updateResult = updateResults[0];
+
+                const success = !!(updateResult && !updateResult.error);
 
                 if (success) {
                     showMessageBox(`SUCCESS: Status updated to ${validated}.`);
@@ -558,5 +558,6 @@
 </body>
 
 </html>
+
 
 
