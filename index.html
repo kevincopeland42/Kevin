@@ -59,7 +59,6 @@
         const STATUS_FIELD_NAME = "Status";
         const POLE_NUMBER_FIELD = "PoleNumber";
         const GEOCODER_URL = "https://geocode-api.arcgis.com/arcgis/rest/services/World/GeocodeServer";
-        const USER_TOKEN = "3NKHt6i2urmWtqOuugvr9aBZiqWTKRgialUU7P61D4FafvHXw6Tewdp9yw6xew8Rm1Rz_QQCPAUDVt8z9JVLQUL9IM_L3Dbhbsiu89Qs7ujMEqFkeWxoR0kGsuRItEqT2e_bW12oAjHl8gD0pOtZvCh7ejZb4svcKZNPBJN3b0sKKJLlHeuqNVj8Jyvp69CqKiN9vSeqGKz9psRCuR2wMHxQk1YqD2yf2KV6axhbfseS_Qfic3gigYml1ZMNIDicRNdXMzoL7__qmwYv5kZfMdAWBxOguxiitm4OGfYqvGJHshUYtYzQNTXDQCiIfMM_UxTeWerZiVd6p5hAF_DZHw";
 
         let map = null;
         let view = null;
@@ -213,10 +212,6 @@
         };
 
         const handleAddNewPole = () => {
-            if (!USER_TOKEN) {
-                showMessageBox('To add a new pole, you must paste a valid ArcGIS token into the USER_TOKEN variable.');
-                return;
-            }
             if (!navigator.geolocation) {
                 showMessageBox('Geolocation is not supported by your browser. Cannot add pole by GPS.');
                 return;
@@ -263,10 +258,8 @@
                 return;
             }
 
-            const layerUrl = USER_TOKEN ? `${url}?token=${USER_TOKEN}` : url;
-
             activeLayer = new FeatureLayer({
-                url: layerUrl,
+                url,
                 outFields: ['*'],
                 renderer: statusRenderer,
                 popupTemplate: {
@@ -326,62 +319,46 @@
                 'esri/layers/FeatureLayer',
                 'esri/rest/support/Query',
                 'esri/rest/locator',
-                'esri/core/reactiveUtils'
-            ], (esriConfig, Map, MapView, FeatureLayer, Query, locator, reactiveUtils) => {
+                'esri/core/reactiveUtils',
+                'esri/identity/OAuthInfo',
+                'esri/identity/IdentityManager'
+            ], (esriConfig, Map, MapView, FeatureLayer, Query, locator, reactiveUtils, OAuthInfo, IdentityManager) => {
                 esriModulePromise.resolve({ Query, FeatureLayer, locator });
 
-                if (USER_TOKEN) {
-                    esriConfig.request.interceptors.push({
-                        urls: /(services7\.arcgis\.com|\.arcgis\.com|\.arcgisonline\.com|geocode-api\.arcgis\.com)/i,
-                        before: (params) => {
-                            params.requestOptions.query = params.requestOptions.query || {};
-                            if (!params.requestOptions.query.token) {
-                                params.requestOptions.query.token = USER_TOKEN;
-                            }
+                const info = new OAuthInfo({
+                    appId: 'MY_CLIENT_ID_HERE',
+                    popup: true
+                });
 
-                            const urlObj = new URL(params.url, window.location.origin);
-                            if (!urlObj.searchParams.get('token')) {
-                                urlObj.searchParams.set('token', USER_TOKEN);
-                                params.url = urlObj.toString();
-                            }
+                IdentityManager.registerOAuthInfos([info]);
 
-                            const body = params.requestOptions.body;
-                            if (body instanceof FormData) {
-                                if (!body.has('token')) {
-                                    body.append('token', USER_TOKEN);
-                                }
-                            } else if (body instanceof URLSearchParams) {
-                                if (!body.has('token')) {
-                                    body.set('token', USER_TOKEN);
-                                }
-                            }
+                IdentityManager.getCredential(`${info.portalUrl}/sharing`).then(() => {
+                    map = new Map({ basemap: 'streets-navigation-vector' });
+                    view = new MapView({
+                        container: 'map-view',
+                        map,
+                        center: [-71.0589, 42.3601],
+                        zoom: 12,
+                        popup: {
+                            dockEnabled: true,
+                            dockOptions: { buttonEnabled: false, breakpoint: false }
                         }
                     });
-                }
 
-                map = new Map({ basemap: 'streets-navigation-vector' });
-                view = new MapView({
-                    container: 'map-view',
-                    map,
-                    center: [-71.0589, 42.3601],
-                    zoom: 12,
-                    popup: {
-                        dockEnabled: true,
-                        dockOptions: { buttonEnabled: false, breakpoint: false }
-                    }
-                });
+                    setActiveLayer('transfer');
 
-                setActiveLayer('transfer');
-
-                reactiveUtils.when(() => view.popup, () => {
-                    view.popup.on('trigger-action', handlePopupAction);
-                });
-                document.getElementById('layer-select').addEventListener('change', (e) => setActiveLayer(e.target.value));
-                document.getElementById('my-location-btn').addEventListener('click', geolocate);
-                document.getElementById('add-pole-btn').addEventListener('click', handleAddNewPole);
-                document.getElementById('search-btn').addEventListener('click', handleSearch);
-                document.getElementById('search-input').addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter') handleSearch();
+                    reactiveUtils.when(() => view.popup, () => {
+                        view.popup.on('trigger-action', handlePopupAction);
+                    });
+                    document.getElementById('layer-select').addEventListener('change', (e) => setActiveLayer(e.target.value));
+                    document.getElementById('my-location-btn').addEventListener('click', geolocate);
+                    document.getElementById('add-pole-btn').addEventListener('click', handleAddNewPole);
+                    document.getElementById('search-btn').addEventListener('click', handleSearch);
+                    document.getElementById('search-input').addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter') handleSearch();
+                    });
+                }).catch((error) => {
+                    showMessageBox(`Authentication failed: ${error.message}`);
                 });
             });
         };
