@@ -267,7 +267,11 @@
                     (result.updateFeatureResults && result.updateFeatureResults[0]) ||
                     null;
 
-                if (updateResult?.success === true) {
+                const success =
+                    updateResult?.success === true ||
+                    (updateResult && updateResult.error === null);
+
+                if (success) {
                     showMessageBox(`SUCCESS: Status updated to ${validated}.`);
                     activeLayer.refresh();
                     return;
@@ -276,9 +280,9 @@
                 const errorDetails = surfaceArcGISError(updateResult?.error);
                 showMessageBox(`FAILED to update pole ${objectId}.\n${errorDetails}`);
             } catch (error) {
-                console.error("[DirectSync][Update][CATCH ERROR]", error);
-                showMessageBox("Client-side JS error AFTER update.\nCheck console for details.");
-
+                logApplyEditsResponse(error);
+                const message = surfaceArcGISError(error, `Network or applyEdits Error: ${error.message}`);
+                showMessageBox(message);
             }
         };
 
@@ -299,7 +303,7 @@
                 if (addResult?.success) {
                     const newId = addResult.objectId;
                     showMessageBox('SUCCESS: New pole added at your location!');
-                    setTimeout(() => activeLayer.refresh(), 150);
+                    activeLayer.refresh();
                     zoomToFeatureById(newId);
                 } else {
                     const errorDetails = surfaceArcGISError(addResult?.error, 'Unknown add error. Check Feature Layer settings.');
@@ -554,4 +558,5 @@
 </body>
 
 </html>
+
 
