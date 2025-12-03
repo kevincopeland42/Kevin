@@ -262,21 +262,19 @@
             try {
                 const result = await activeLayer.applyEdits(payload);
                 logApplyEditsResponse(result);
-                const updateResults = result.updateResults || result.updateFeatureResults;
-                const updateResult = updateResults?.[0];
-                const success = updateResult?.success === true;
-                console.info('[ArcGIS][Update] Result success flags', {
-                    updateResults: result.updateResults,
-                    updateFeatureResults: result.updateFeatureResults,
-                    firstSuccess: updateResult?.success
-                });
-                if (success) {
+                const updateResult =
+                    (result.updateResults && result.updateResults[0]) ||
+                    (result.updateFeatureResults && result.updateFeatureResults[0]) ||
+                    null;
+
+                if (updateResult?.success === true) {
                     showMessageBox(`SUCCESS: Status updated to ${validated}.`);
                     activeLayer.refresh();
-                } else {
-                    const errorDetails = surfaceArcGISError(updateResult?.error);
-                    showMessageBox(`FAILED to update pole ${objectId}.\n${errorDetails}`);
+                    return;
                 }
+
+                const errorDetails = surfaceArcGISError(updateResult?.error);
+                showMessageBox(`FAILED to update pole ${objectId}.\n${errorDetails}`);
             } catch (error) {
                 logApplyEditsResponse(error);
                 const message = surfaceArcGISError(error, `Network or applyEdits Error: ${error.message}`);
