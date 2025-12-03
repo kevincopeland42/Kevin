@@ -64,6 +64,9 @@
         let view = null;
         let activeLayer = null;
         let layerView = null;
+        let activeLayerSchema = null;
+        let statusFieldInfo = null;
+        let esriRequestModule = null;
 
         const statusRenderer = {
             type: "unique-value",
@@ -130,41 +133,164 @@
             `;
         };
 
+        const logCredentialStatus = () => {
+            try {
+                const credentials = (window.__esriIdentityManager && window.__esriIdentityManager.credentials) || [];
+                const credential = credentials.find((cred) => cred.server && activeLayer && cred.server.includes(activeLayer.url.split('/FeatureServer')[0]));
+                if (credential) {
+                    const expiresDate = new Date(credential.expires);
+                    console.info('[ArcGIS][Auth] Credential found', {
+                        userId: credential.userId,
+                        expires: credential.expires,
+                        expiresDate: expiresDate.toISOString(),
+                        isExpired: expiresDate.getTime() <= Date.now()
+                    });
+                    if (expiresDate.getTime() <= Date.now()) {
+                        console.warn('[ArcGIS][Auth] Credential is expired. Renew before applyEdits.');
+                    }
+                } else {
+                    console.warn('[ArcGIS][Auth] No credential found for active layer.');
+                }
+            } catch (err) {
+                console.error('[ArcGIS][Auth] Error while checking credentials', err);
+            }
+        };
+
+        const validateStatusValue = (rawStatus) => {
+            if (!statusFieldInfo) return { validated: rawStatus, note: 'No schema loaded; using raw status.' };
+            const fieldType = statusFieldInfo.type;
+            const domain = statusFieldInfo.domain;
+            if (domain && domain.codedValues && Array.isArray(domain.codedValues)) {
+                const match = domain.codedValues.find((cv) => cv.name === rawStatus || cv.code === rawStatus);
+                if (match) {
+                    return { validated: match.code, note: `Mapped status to domain code for ${rawStatus}` };
+                }
+                return { validated: rawStatus, note: 'Status not in coded values; sending raw.' };
+            }
+            if (fieldType && (fieldType.toLowerCase().includes('double') || fieldType.toLowerCase().includes('integer'))) {
+                const asNumber = Number(rawStatus);
+                return { validated: Number.isNaN(asNumber) ? rawStatus : asNumber, note: 'Numeric status field detected.' };
+            }
+            return { validated: rawStatus, note: 'Default validation path.' };
+        };
+
+        const logApplyEditsRequest = (payload, method = 'POST', meta = {}) => {
+            const requestUrl = activeLayer?.url || 'Unknown URL';
+            console.info('[ArcGIS][applyEdits][Request]', {
+                url: requestUrl,
+                method,
+                payload,
+                payloadJson: JSON.stringify(payload, null, 2),
+                layerUrl: activeLayer?.url,
+                layerId: activeLayer?.layerId,
+                statusField: STATUS_FIELD_NAME,
+                meta,
+                oauthSession: (window.__esriIdentityManager && window.__esriIdentityManager.credentials?.map((c) => ({ userId: c.userId, server: c.server, expires: c.expires })) ) || []
+            });
+        };
+
+        const logApplyEditsResponse = (result) => {
+            console.info('[ArcGIS][applyEdits][Response raw]', result);
+            try {
+                console.info('[ArcGIS][applyEdits][Response JSON]', JSON.stringify(result, null, 2));
+            } catch (err) {
+                console.warn('[ArcGIS][applyEdits][Response stringify error]', err);
+            }
+        };
+
+        const surfaceArcGISError = (errorObj, fallback = 'Unknown update error.') => {
+            if (!errorObj) return fallback;
+            const code = errorObj.code || errorObj.error?.code;
+            const message = errorObj.message || errorObj.error?.message || errorObj.description;
+            const details = errorObj.details || errorObj.error?.details;
+            const stack = errorObj.stack;
+            const parts = [
+                code ? `Code: ${code}` : null,
+                message ? `Message: ${message}` : null,
+                details ? `Details: ${JSON.stringify(details)}` : null,
+                stack ? `Stack: ${stack}` : null
+            ].filter(Boolean);
+            return parts.length ? parts.join('\n') : fallback;
+        };
+
+        const fetchLayerSchema = async (layerUrl) => {
+            try {
+                const cleanUrl = layerUrl.split('?')[0];
+                console.info('[ArcGIS][Schema] Fetching schema for', cleanUrl);
+                const requestFn = esriRequestModule || window.__esriRequest;
+                let schema = null;
+                if (requestFn) {
+                    const response = await requestFn(`${cleanUrl}?f=json`, { responseType: 'json' });
+                    schema = response.data;
+                } else {
+                    const response = await fetch(`${cleanUrl}?f=json`);
+                    schema = await response.json();
+                }
+                console.info('[ArcGIS][Schema] Metadata', schema);
+                activeLayerSchema = schema;
+                statusFieldInfo = schema.fields?.find((f) => f.name === STATUS_FIELD_NAME) || null;
+                if (statusFieldInfo) {
+                    console.info('[ArcGIS][Schema] Status field info', statusFieldInfo);
+                    if (statusFieldInfo.domain) {
+                        console.info('[ArcGIS][Schema] Status domain', statusFieldInfo.domain);
+                    }
+                } else {
+                    console.warn('[ArcGIS][Schema] Status field not found in schema');
+                }
+                if (schema.capabilities) {
+                    console.info('[ArcGIS][Schema] Layer capabilities', schema.capabilities);
+                }
+            } catch (err) {
+                console.error('[ArcGIS][Schema] Failed to fetch schema', err);
+            }
+        };
+
         const updateStatusOnLayer = async (objectId, newStatus) => {
             if (!activeLayer) return;
+            logCredentialStatus();
+            const { validated, note } = validateStatusValue(newStatus);
+            console.info('[ArcGIS][Update] Status validation', { rawStatus: newStatus, validatedStatus: validated, note });
+            const payload = {
+                updateFeatures: [{
+                    attributes: {
+                        OBJECTID: objectId,
+                        [STATUS_FIELD_NAME]: validated
+                    }
+                }]
+            };
+            logApplyEditsRequest(payload, 'POST', { objectId, status: validated, rawStatus: newStatus });
             try {
-                const result = await activeLayer.applyEdits({
-                    updateFeatures: [{
-                        attributes: {
-                            OBJECTID: objectId,
-                            [STATUS_FIELD_NAME]: newStatus
-                        }
-                    }]
-                });
-
-                const success = result.updateFeatureResults?.[0]?.success;
+                const result = await activeLayer.applyEdits(payload);
+                logApplyEditsResponse(result);
+                const updateResult = result.updateFeatureResults?.[0];
+                const success = updateResult?.success;
                 if (success) {
-                    showMessageBox(`SUCCESS: Status updated to ${newStatus}.`);
+                    showMessageBox(`SUCCESS: Status updated to ${validated}.`);
                     activeLayer.refresh();
                 } else {
-                    const error = result.updateFeatureResults?.[0]?.error?.description || 'Unknown update error.';
-                    showMessageBox(`FAILED to update pole ${objectId}.\nReason: ${error}`);
+                    const errorDetails = surfaceArcGISError(updateResult?.error);
+                    showMessageBox(`FAILED to update pole ${objectId}.\n${errorDetails}`);
                 }
             } catch (error) {
-                showMessageBox(`Network Error: ${error.message}`);
+                logApplyEditsResponse(error);
+                const message = surfaceArcGISError(error, `Network Error: ${error.message}`);
+                showMessageBox(message);
             }
         };
 
         const addNewPoleAtLocation = async (lat, lng) => {
             if (!activeLayer) return;
+            logCredentialStatus();
+            const payload = {
+                addFeatures: [{
+                    geometry: { type: "point", longitude: lng, latitude: lat },
+                    attributes: { [STATUS_FIELD_NAME]: 'Ready' }
+                }]
+            };
+            logApplyEditsRequest(payload, 'POST', { lat, lng, status: 'Ready' });
             try {
-                const result = await activeLayer.applyEdits({
-                    addFeatures: [{
-                        geometry: { type: "point", longitude: lng, latitude: lat },
-                        attributes: { [STATUS_FIELD_NAME]: 'Ready' }
-                    }]
-                });
-
+                const result = await activeLayer.applyEdits(payload);
+                logApplyEditsResponse(result);
                 const addResult = result.addFeatureResults?.[0];
                 if (addResult?.success) {
                     const newId = addResult.objectId;
@@ -172,11 +298,13 @@
                     activeLayer.refresh();
                     zoomToFeatureById(newId);
                 } else {
-                    const error = addResult?.error?.description || 'Unknown add error. Check Feature Layer settings.';
-                    showMessageBox(`FAILED to add new pole.\nReason: ${error}`);
+                    const errorDetails = surfaceArcGISError(addResult?.error, 'Unknown add error. Check Feature Layer settings.');
+                    showMessageBox(`FAILED to add new pole.\n${errorDetails}`);
                 }
             } catch (error) {
-                showMessageBox(`Network Error: ${error.message}`);
+                logApplyEditsResponse(error);
+                const message = surfaceArcGISError(error, `Network Error: ${error.message}`);
+                showMessageBox(message);
             }
         };
 
@@ -228,6 +356,7 @@
         };
 
         const handlePopupAction = (event) => {
+            console.info('[ArcGIS][PopupAction] Triggered', event);
             const feature = view.popup.selectedFeature;
             if (!feature) return;
             const objectId = feature.attributes?.OBJECTID;
@@ -245,6 +374,7 @@
         const setActiveLayer = async (layerKey) => {
             if (!map) return;
             const { FeatureLayer } = await esriModulePromise;
+            console.info('[ArcGIS][Layer] Switching active layer', layerKey);
             if (activeLayer) {
                 map.remove(activeLayer);
                 activeLayer.destroy();
@@ -257,6 +387,8 @@
                 showMessageBox('No URL configured for this layer. Please update the MAINTENANCE_FEATURE_LAYER_URL value.');
                 return;
             }
+
+            await fetchLayerSchema(url);
 
             activeLayer = new FeatureLayer({
                 url,
@@ -321,9 +453,13 @@
                 'esri/rest/locator',
                 'esri/core/reactiveUtils',
                 'esri/identity/OAuthInfo',
-                'esri/identity/IdentityManager'
-            ], (esriConfig, Map, MapView, FeatureLayer, Query, locator, reactiveUtils, OAuthInfo, IdentityManager) => {
+                'esri/identity/IdentityManager',
+                'esri/request'
+            ], (esriConfig, Map, MapView, FeatureLayer, Query, locator, reactiveUtils, OAuthInfo, IdentityManager, esriRequest) => {
                 esriModulePromise.resolve({ Query, FeatureLayer, locator });
+                window.__esriIdentityManager = IdentityManager;
+                window.__esriRequest = esriRequest;
+                esriRequestModule = esriRequest;
 
                 const info = new OAuthInfo({
                     portalUrl: 'https://www.arcgis.com',
@@ -374,6 +510,39 @@
             promise.resolve = resolveFn;
             return promise;
         })();
+
+        window.testArcGISUpdate = async (objectId, newStatus) => {
+            console.info('[ArcGIS][Debug][testArcGISUpdate] Starting manual update', { objectId, newStatus });
+            if (!activeLayer) {
+                console.warn('[ArcGIS][Debug][testArcGISUpdate] No active layer set.');
+                return;
+            }
+            logCredentialStatus();
+            const { validated, note } = validateStatusValue(newStatus);
+            console.info('[ArcGIS][Debug][testArcGISUpdate] Validation', { raw: newStatus, validated, note });
+            const payload = {
+                updateFeatures: [{
+                    attributes: {
+                        OBJECTID: objectId,
+                        [STATUS_FIELD_NAME]: validated
+                    }
+                }]
+            };
+            logApplyEditsRequest(payload, 'POST', { objectId, status: validated, rawStatus: newStatus, context: 'testArcGISUpdate' });
+            try {
+                const result = await activeLayer.applyEdits(payload);
+                logApplyEditsResponse(result);
+                const updateResult = result.updateFeatureResults?.[0];
+                if (updateResult?.success) {
+                    console.info('[ArcGIS][Debug][testArcGISUpdate] Success', updateResult);
+                } else {
+                    console.error('[ArcGIS][Debug][testArcGISUpdate] Failure', updateResult);
+                }
+            } catch (error) {
+                logApplyEditsResponse(error);
+                console.error('[ArcGIS][Debug][testArcGISUpdate] Exception', error);
+            }
+        };
 
         window.onload = initializeMap;
     </script>
