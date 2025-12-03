@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OAuth Callback</title>
+    <script>
+        // Let user know authentication is complete
+        document.addEventListener("DOMContentLoaded", function() {
+            document.body.innerHTML = "<p>Authentication successful. You may close this window.</p>";
+            
+            // Pass the authorization code back to the main window
+            if (window.opener && window.opener.require) {
+                window.opener.require(["esri/identity/IdentityManager"], function(IdentityManager) {
+                    IdentityManager.completeOAuthRedirect(window.location.href);
+                });
+            } else {
+                // Fallback in case opener doesn't have require
+                console.log("OAuth callback received. Close this window.");
+            }
+        });
+    </script>
+</head>
+<body>
+    <!-- Content will be replaced by script -->
+</body>
+</html>
