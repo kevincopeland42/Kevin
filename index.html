@@ -55,10 +55,8 @@
         const FEATURE_LAYER_URL = "https://services7.arcgis.com/NanlOhKb0A7a7kSU/arcgis/rest/services/Pole_Transfer_System__DEV__Transfers/FeatureServer/0";
         const MAINTENANCE_FEATURE_LAYER_URL = ""; // Placeholder for future maintenance layer
         const STATUS_FIELD_NAME = "Status";
-        const NEW_POLE_FIELD = "New Pole #";
-        const OLD_POLE_FIELD = "Old Pole #";
-        const NEW_POLE_FIELD_CANDIDATES = [NEW_POLE_FIELD, 'New_Pole_', 'New_Pole_Num', 'New_Pole_Number', 'NewPoleNumber', 'NewPole'];
-        const OLD_POLE_FIELD_CANDIDATES = [OLD_POLE_FIELD, 'Old_Pole_', 'Old_Pole_Num', 'Old_Pole_Number', 'OldPoleNumber', 'OldPole'];
+        const NEW_POLE_FIELD = "New_Pole__";
+        const OLD_POLE_FIELD = "Old_Pole__";
         const POLE_NUMBER_FIELD = "PoleNumber";
         const GEOCODER_URL = "https://geocode-api.arcgis.com/arcgis/rest/services/World/GeocodeServer";
 
@@ -117,41 +115,6 @@
             { title: "Set Blocked", id: "set-blocked", className: "esri-icon-close" },
             { title: "Set Completed", id: "set-completed", className: "esri-icon-checkbox-checked" }
         ]);
-
-        const getAttributeValue = (attributes = {}, candidates = []) => {
-            for (const field of candidates) {
-                if (attributes[field] !== undefined && attributes[field] !== null && attributes[field] !== '') {
-                    return attributes[field];
-                }
-            }
-            return null;
-        };
-
-        const derivePoleNumber = (attributes = {}) => {
-            const newPole = getAttributeValue(attributes, NEW_POLE_FIELD_CANDIDATES);
-            const oldPole = getAttributeValue(attributes, OLD_POLE_FIELD_CANDIDATES);
-            return newPole || oldPole || attributes[POLE_NUMBER_FIELD] || 'N/A';
-        };
-
-        const popupContent = (feature) => {
-            const attributes = feature.graphic.attributes || {};
-            const town = attributes['Town'] || 'N/A';
-            const road = attributes['Road'] || 'N/A';
-            const latitude = attributes['Latitude'] || 'N/A';
-            const longitude = attributes['Longitude'] || 'N/A';
-            const status = attributes[STATUS_FIELD_NAME] || 'Unknown';
-            const poleNumber = derivePoleNumber(attributes);
-
-            return `
-                <div class="space-y-2 text-sm">
-                    <div class="font-semibold text-gray-900">${town} - ${road}</div>
-                    <div><strong>Pole #:</strong> ${poleNumber}</div>
-                    <div><strong>Status:</strong> ${status}</div>
-                    <div><strong>Lat/Lon:</strong> ${latitude}, ${longitude}</div>
-                    <p class="text-xs text-gray-500">Use the popup actions to change status.</p>
-                </div>
-            `;
-        };
 
         const logCredentialStatus = () => {
             try {
@@ -407,21 +370,19 @@
                 singleLineFieldName: 'SingleLine',
                 url: GEOCODER_URL
             };
-            const resolveFields = (candidates = []) => {
-                if (!activeLayer?.fields) return candidates;
-                const existing = candidates.filter((name) => activeLayer.fields.some((f) => f.name === name));
-                return existing.length ? existing : candidates;
+            const resolveFields = (fields = []) => {
+                if (!activeLayer?.fields) return fields;
+                const existing = fields.filter((name) => activeLayer.fields.some((f) => f.name === name));
+                return existing.length ? existing : fields;
             };
 
-            const newPoleFields = resolveFields(NEW_POLE_FIELD_CANDIDATES);
-            const oldPoleFields = resolveFields(OLD_POLE_FIELD_CANDIDATES);
-            const searchFields = [...newPoleFields, ...oldPoleFields, ...resolveFields([POLE_NUMBER_FIELD]), ...resolveFields(['Road']), ...resolveFields(['Town'])];
-            const displayField = newPoleFields[0] || oldPoleFields[0] || POLE_NUMBER_FIELD;
+            const searchFields = resolveFields([NEW_POLE_FIELD, OLD_POLE_FIELD, POLE_NUMBER_FIELD, 'Road', 'Town']);
+            const displayField = searchFields.includes(OLD_POLE_FIELD) ? OLD_POLE_FIELD : (searchFields[0] || POLE_NUMBER_FIELD);
             const featureSource = activeLayer ? {
                 layer: activeLayer,
                 searchFields,
                 displayField,
-                suggestionTemplate: '{New Pole #} / {Old Pole #} - {Road}, {Town}',
+                suggestionTemplate: `{${NEW_POLE_FIELD}} / {${OLD_POLE_FIELD}} - {Road}, {Town}`,
                 exactMatch: false,
                 outFields: ['*'],
                 name: 'Poles',
@@ -454,8 +415,22 @@
                 outFields: ['*'],
                 renderer: statusRenderer,
                 popupTemplate: {
-                    title: '{Town} - {Road}',
-                    content: popupContent,
+                    title: 'Pole: {expression/poleLabel}',
+                    content: `
+                        <div class="space-y-2 text-sm">
+                            <div class="font-semibold text-gray-900">{Town} - {Road}</div>
+                            <div><strong>Pole #:</strong> {expression/poleLabel}</div>
+                            <div><strong>Status:</strong> {Status}</div>
+                            <div><strong>Lat/Lon:</strong> {Latitude}, {Longitude}</div>
+                            <p class="text-xs text-gray-500">Use the popup actions to change status.</p>
+                        </div>
+                    `,
+                    expressionInfos: [
+                        {
+                            name: 'poleLabel',
+                            expression: "IIF(!IsEmpty($feature.New_Pole__), $feature.New_Pole__, $feature.Old_Pole__)"
+                        }
+                    ],
                     actions: getPopupActions()
                 }
             });
