@@ -432,7 +432,7 @@
 
         const setActiveLayer = async (layerKey) => {
             if (!map) return;
-            const { FeatureLayer } = await esriModulePromise;
+            const { FeatureLayer, Query } = await esriModulePromise;
             console.info('[ArcGIS][Layer] Switching active layer', layerKey);
             if (activeLayer) {
                 map.remove(activeLayer);
@@ -461,6 +461,20 @@
             });
 
             map.add(activeLayer);
+
+            try {
+                await activeLayer.load();
+                const fieldDebug = (activeLayer.fields || []).map((f) => ({ name: f.name, alias: f.alias, type: f.type }));
+                console.log('[ArcGIS][Debug][Fields]', fieldDebug);
+
+                const debugQuery = new Query({ where: '1=1', outFields: ['*'], returnGeometry: false, num: 1 });
+                const debugResult = await activeLayer.queryFeatures(debugQuery);
+                const firstAttributes = debugResult.features?.[0]?.attributes || null;
+                console.log('[ArcGIS][Debug][FirstFeatureAttributes]', firstAttributes);
+            } catch (err) {
+                console.warn('[ArcGIS][Debug] Failed to log fields or sample feature', err);
+            }
+
             view.whenLayerView(activeLayer).then((lv) => {
                 layerView = lv;
             });
