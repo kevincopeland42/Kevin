@@ -57,6 +57,8 @@
         const STATUS_FIELD_NAME = "Status";
         const NEW_POLE_FIELD = "New Pole #";
         const OLD_POLE_FIELD = "Old Pole #";
+        const NEW_POLE_FIELD_CANDIDATES = [NEW_POLE_FIELD, 'New_Pole_', 'New_Pole_Num', 'New_Pole_Number', 'NewPoleNumber', 'NewPole'];
+        const OLD_POLE_FIELD_CANDIDATES = [OLD_POLE_FIELD, 'Old_Pole_', 'Old_Pole_Num', 'Old_Pole_Number', 'OldPoleNumber', 'OldPole'];
         const POLE_NUMBER_FIELD = "PoleNumber";
         const GEOCODER_URL = "https://geocode-api.arcgis.com/arcgis/rest/services/World/GeocodeServer";
 
@@ -116,10 +118,19 @@
             { title: "Set Completed", id: "set-completed", className: "esri-icon-checkbox-checked" }
         ]);
 
+        const getAttributeValue = (attributes = {}, candidates = []) => {
+            for (const field of candidates) {
+                if (attributes[field] !== undefined && attributes[field] !== null && attributes[field] !== '') {
+                    return attributes[field];
+                }
+            }
+            return null;
+        };
+
         const derivePoleNumber = (attributes = {}) => {
-            const newPole = attributes[NEW_POLE_FIELD];
-            const oldPole = attributes[OLD_POLE_FIELD];
-            return newPole || oldPole || 'N/A';
+            const newPole = getAttributeValue(attributes, NEW_POLE_FIELD_CANDIDATES);
+            const oldPole = getAttributeValue(attributes, OLD_POLE_FIELD_CANDIDATES);
+            return newPole || oldPole || attributes[POLE_NUMBER_FIELD] || 'N/A';
         };
 
         const popupContent = (feature) => {
@@ -396,10 +407,20 @@
                 singleLineFieldName: 'SingleLine',
                 url: GEOCODER_URL
             };
+            const resolveFields = (candidates = []) => {
+                if (!activeLayer?.fields) return candidates;
+                const existing = candidates.filter((name) => activeLayer.fields.some((f) => f.name === name));
+                return existing.length ? existing : candidates;
+            };
+
+            const newPoleFields = resolveFields(NEW_POLE_FIELD_CANDIDATES);
+            const oldPoleFields = resolveFields(OLD_POLE_FIELD_CANDIDATES);
+            const searchFields = [...newPoleFields, ...oldPoleFields, ...resolveFields([POLE_NUMBER_FIELD]), ...resolveFields(['Road']), ...resolveFields(['Town'])];
+            const displayField = newPoleFields[0] || oldPoleFields[0] || POLE_NUMBER_FIELD;
             const featureSource = activeLayer ? {
                 layer: activeLayer,
-                searchFields: [NEW_POLE_FIELD, OLD_POLE_FIELD, 'Road', 'Town'],
-                displayField: NEW_POLE_FIELD,
+                searchFields,
+                displayField,
                 suggestionTemplate: '{New Pole #} / {Old Pole #} - {Road}, {Town}',
                 exactMatch: false,
                 outFields: ['*'],
