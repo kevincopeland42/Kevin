@@ -55,6 +55,8 @@
         const FEATURE_LAYER_URL = "https://services7.arcgis.com/NanlOhKb0A7a7kSU/arcgis/rest/services/Pole_Transfer_System__DEV__Transfers/FeatureServer/0";
         const MAINTENANCE_FEATURE_LAYER_URL = ""; // Placeholder for future maintenance layer
         const STATUS_FIELD_NAME = "Status";
+        const NEW_POLE_FIELD = "New Pole #";
+        const OLD_POLE_FIELD = "Old Pole #";
         const POLE_NUMBER_FIELD = "PoleNumber";
         const GEOCODER_URL = "https://geocode-api.arcgis.com/arcgis/rest/services/World/GeocodeServer";
 
@@ -114,6 +116,13 @@
             { title: "Set Completed", id: "set-completed", className: "esri-icon-checkbox-checked" }
         ]);
 
+        const derivePoleNumber = (attributes = {}) => {
+            const newPole = attributes[NEW_POLE_FIELD];
+            const oldPole = attributes[OLD_POLE_FIELD];
+            const legacyPole = attributes[POLE_NUMBER_FIELD];
+            return newPole || oldPole || legacyPole || 'N/A';
+        };
+
         const popupContent = (feature) => {
             const attributes = feature.graphic.attributes || {};
             const town = attributes['Town'] || 'N/A';
@@ -121,7 +130,7 @@
             const latitude = attributes['Latitude'] || 'N/A';
             const longitude = attributes['Longitude'] || 'N/A';
             const status = attributes[STATUS_FIELD_NAME] || 'Unknown';
-            const poleNumber = attributes[POLE_NUMBER_FIELD] || 'N/A';
+            const poleNumber = derivePoleNumber(attributes);
 
             return `
                 <div class="space-y-2 text-sm">
@@ -390,9 +399,9 @@
             };
             const featureSource = activeLayer ? {
                 layer: activeLayer,
-                searchFields: [POLE_NUMBER_FIELD, 'Road', 'Town'],
-                displayField: POLE_NUMBER_FIELD,
-                suggestionTemplate: '{PoleNumber} - {Road}, {Town}',
+                searchFields: [NEW_POLE_FIELD, OLD_POLE_FIELD, POLE_NUMBER_FIELD, 'Road', 'Town'],
+                displayField: NEW_POLE_FIELD,
+                suggestionTemplate: '{New Pole #} / {Old Pole #} - {Road}, {Town}',
                 exactMatch: false,
                 outFields: ['*'],
                 name: 'Poles',
