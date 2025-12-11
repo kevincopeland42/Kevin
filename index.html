@@ -119,8 +119,7 @@
         const derivePoleNumber = (attributes = {}) => {
             const newPole = attributes[NEW_POLE_FIELD];
             const oldPole = attributes[OLD_POLE_FIELD];
-            const legacyPole = attributes[POLE_NUMBER_FIELD];
-            return newPole || oldPole || legacyPole || 'N/A';
+            return newPole || oldPole || 'N/A';
         };
 
         const popupContent = (feature) => {
@@ -399,7 +398,7 @@
             };
             const featureSource = activeLayer ? {
                 layer: activeLayer,
-                searchFields: [NEW_POLE_FIELD, OLD_POLE_FIELD, POLE_NUMBER_FIELD, 'Road', 'Town'],
+                searchFields: [NEW_POLE_FIELD, OLD_POLE_FIELD, 'Road', 'Town'],
                 displayField: NEW_POLE_FIELD,
                 suggestionTemplate: '{New Pole #} / {Old Pole #} - {Road}, {Town}',
                 exactMatch: false,
