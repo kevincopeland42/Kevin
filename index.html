@@ -1,384 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DirectSync Web Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://js.arcgis.com/4.29/esri/themes/light/main.css" />
+    <script src="https://js.arcgis.com/4.29/"></script>
+    <style>
+        .font-sans { font-family: 'Inter', sans-serif; }
+        .esri-ui-top-left { top: 10rem !important; }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans relative min-h-screen">
 
-import React, { useEffect, useRef } from 'react';
-import { 
-  FEATURE_LAYER_URL, 
-  MAINTENANCE_FEATURE_LAYER_URL, 
-  STATUS_FIELD_NAME, 
-  GEOCODER_URL,
-  NEW_POLE_FIELD,
-  OLD_POLE_FIELD,
-  POLE_NUMBER_FIELD
-} from '../constants';
+    <div id="map-view" class="fixed inset-0 w-full h-full z-0"></div>
 
-interface MapContainerProps {
-  activeLayerType: 'transfer' | 'maintenance';
-  onMessage: (msg: string) => void;
-  actionsRef: React.MutableRefObject<any>;
-}
-
-const MapContainer: React.FC<MapContainerProps> = ({ activeLayerType, onMessage, actionsRef }) => {
-  const mapDivRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<any>(null);
-  const viewRef = useRef<any>(null);
-  const activeLayerRef = useRef<any>(null);
-  const searchWidgetRef = useRef<any>(null);
-  const statusFieldInfoRef = useRef<any>(null);
-
-  const statusRenderer = {
-    type: "unique-value",
-    field: STATUS_FIELD_NAME,
-    defaultSymbol: {
-      type: "simple-marker",
-      color: "#6b7280",
-      outline: { color: "#ffffff", width: 1 }
-    },
-    uniqueValueInfos: [
-      {
-        value: "Ready",
-        symbol: { type: "simple-marker", color: "#16a34a", outline: { color: "#ffffff", width: 1 } },
-        label: "Ready"
-      },
-      {
-        value: "Blocked",
-        symbol: { type: "simple-marker", color: "#dc2626", outline: { color: "#ffffff", width: 1 } },
-        label: "Blocked"
-      },
-      {
-        value: "Completed",
-        symbol: { type: "simple-marker", color: "#eab308", outline: { color: "#ffffff", width: 1 } },
-        label: "Completed"
-      }
-    ]
-  };
-
-  const getPopupActions = () => ([
-    { title: "Set Ready", id: "set-ready", className: "esri-icon-check-mark" },
-    { title: "Set Blocked", id: "set-blocked", className: "esri-icon-close" },
-    { title: "Set Completed", id: "set-completed", className: "esri-icon-checkbox-checked" }
-  ]);
-
-  // Surface errors strictly as requested
-  const surfaceArcGISError = (errorObj: any, fallback = 'Unknown update error.') => {
-    if (!errorObj) return fallback;
-    const code = errorObj.code || errorObj.error?.code;
-    const message = errorObj.message || errorObj.error?.message || errorObj.description;
-    const details = errorObj.details || errorObj.error?.details;
-    const parts = [
-      code ? `Code: ${code}` : null,
-      message ? `Message: ${message}` : null,
-      details ? `Details: ${JSON.stringify(details)}` : null
-    ].filter(Boolean);
-    return parts.length ? parts.join('\n') : fallback;
-  };
-
-  const validateStatusValue = (rawStatus: string) => {
-    const fieldInfo = statusFieldInfoRef.current;
-    if (!fieldInfo) return { validated: rawStatus, note: 'No schema loaded; using raw status.' };
-    
-    const domain = fieldInfo.domain;
-    if (domain && domain.codedValues && Array.isArray(domain.codedValues)) {
-      const match = domain.codedValues.find((cv: any) => cv.name === rawStatus || cv.code === rawStatus);
-      if (match) return { validated: match.code, note: `Mapped status to domain code for ${rawStatus}` };
-    }
-    
-    const fieldType = fieldInfo.type;
-    if (fieldType && (fieldType.toLowerCase().includes('double') || fieldType.toLowerCase().includes('integer'))) {
-      const asNumber = Number(rawStatus);
-      return { validated: Number.isNaN(asNumber) ? rawStatus : asNumber, note: 'Numeric status field detected.' };
-    }
-    return { validated: rawStatus, note: 'Default validation path.' };
-  };
-
-  const updateStatusOnLayer = async (objectId: number, newStatus: string) => {
-    const layer = activeLayerRef.current;
-    if (!layer) return;
-
-    const { validated } = validateStatusValue(newStatus);
-    const payload = {
-      updateFeatures: [{
-        attributes: {
-          OBJECTID: objectId,
-          [STATUS_FIELD_NAME]: validated
-        }
-      }]
-    };
-
-    try {
-      const result = await layer.applyEdits(payload);
-      const updateResults = result.updateFeatureResults || result.updateResults || [];
-      const updateResult = updateResults[0];
-
-      if (updateResult && !updateResult.error) {
-        onMessage(`SUCCESS: Status updated to ${newStatus}.`);
-        layer.refresh();
-      } else {
-        const err = surfaceArcGISError(updateResult?.error);
-        onMessage(`FAILED to update pole ${objectId}.\n${err}`);
-      }
-    } catch (error: any) {
-      onMessage(`Network Error: ${error.message}`);
-    }
-  };
-
-  const addNewPoleAtLocation = async (lat: number, lng: number) => {
-    const layer = activeLayerRef.current;
-    if (!layer) return;
-
-    const payload = {
-      addFeatures: [{
-        geometry: { type: "point", longitude: lng, latitude: lat },
-        attributes: { [STATUS_FIELD_NAME]: 'Ready' }
-      }]
-    };
-
-    try {
-      const result = await layer.applyEdits(payload);
-      const addResult = result.addFeatureResults?.[0];
-      if (addResult?.success) {
-        onMessage('SUCCESS: New pole added at your location!');
-        layer.refresh();
-        
-        // Zoom to the new feature
-        const { Query } = await getArcGISModules();
-        const query = new Query({
-          objectIds: [addResult.objectId],
-          outFields: ["*"],
-          returnGeometry: true
-        });
-        const queryRes = await layer.queryFeatures(query);
-        if (queryRes.features.length > 0) {
-          viewRef.current.goTo({ target: queryRes.features[0].geometry, zoom: 17 });
-          viewRef.current.popup.open({ 
-            features: [queryRes.features[0]], 
-            location: queryRes.features[0].geometry 
-          });
-        }
-      } else {
-        const err = surfaceArcGISError(addResult?.error, 'Unknown add error. Check layer settings.');
-        onMessage(`FAILED to add new pole.\n${err}`);
-      }
-    } catch (error: any) {
-      onMessage(`Network Error: ${error.message}`);
-    }
-  };
-
-  const getArcGISModules = () => {
-    return new Promise<any>((resolve) => {
-      // @ts-ignore
-      require([
-        'esri/layers/FeatureLayer',
-        'esri/rest/support/Query',
-        'esri/widgets/Search',
-        'esri/request'
-      ], (FeatureLayer: any, Query: any, Search: any, esriRequest: any) => {
-        resolve({ FeatureLayer, Query, Search, esriRequest });
-      });
-    });
-  };
-
-  const refreshSearchSources = async (layer: any) => {
-    if (!searchWidgetRef.current) return;
-    
-    const geocoderSource = {
-      name: 'Address',
-      placeholder: 'Search address',
-      singleLineFieldName: 'SingleLine',
-      url: GEOCODER_URL
-    };
-
-    const searchFields = [NEW_POLE_FIELD, OLD_POLE_FIELD, POLE_NUMBER_FIELD, 'Road', 'Town']
-      .filter(f => layer.fields.some((lf: any) => lf.name === f));
-
-    const displayField = searchFields.includes(OLD_POLE_FIELD) ? OLD_POLE_FIELD : (searchFields[0] || POLE_NUMBER_FIELD);
-
-    const featureSource = {
-      layer,
-      searchFields,
-      displayField,
-      suggestionTemplate: `{${NEW_POLE_FIELD}} / {${OLD_POLE_FIELD}} - {Road}, {Town}`,
-      exactMatch: false,
-      outFields: ['*'],
-      name: 'Poles',
-      placeholder: 'Pole #, Road, or Town'
-    };
-
-    searchWidgetRef.current.sources = [featureSource, geocoderSource];
-  };
-
-  const switchLayer = async (type: string) => {
-    const { FeatureLayer, esriRequest } = await getArcGISModules();
-    if (activeLayerRef.current) {
-      mapRef.current.remove(activeLayerRef.current);
-    }
-
-    const url = type === 'maintenance' ? MAINTENANCE_FEATURE_LAYER_URL : FEATURE_LAYER_URL;
-    
-    // Fetch schema for validation
-    try {
-      const response = await esriRequest(`${url}?f=json`, { responseType: 'json' });
-      statusFieldInfoRef.current = response.data.fields?.find((f: any) => f.name === STATUS_FIELD_NAME) || null;
-    } catch (err) {
-      console.warn('Failed to fetch layer metadata', err);
-    }
-
-    const layer = new FeatureLayer({
-      url,
-      outFields: ['*'],
-      renderer: statusRenderer,
-      popupTemplate: {
-        title: 'Pole: {expression/poleLabel}',
-        content: `
-          <div class="space-y-3 text-sm p-1">
-            <div class="bg-gray-50 p-3 rounded-lg border border-gray-100">
-               <div class="font-bold text-[#2D6A4F] text-base">{Road}, {Town}</div>
-               <div class="text-xs text-gray-500 uppercase font-semibold mt-1">Asset Location</div>
+    <header class="fixed top-4 left-4 right-4 sm:left-6 sm:right-6 z-50">
+        <div class="bg-white/90 p-6 rounded-xl shadow-lg backdrop-blur">
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <h1 class="text-3xl font-extrabold text-gray-900">DirectSync Web Editor</h1>
+                    <p class="text-sm text-gray-500">Map-first view for managing poles.</p>
+                </div>
+                <div class="flex gap-2 flex-wrap justify-end">
+                    <button id="my-location-btn" class="bg-white border border-blue-200 text-blue-700 hover:bg-blue-50 text-sm font-semibold py-2 px-3 rounded-lg shadow-sm">My Location</button>
+                    <button id="add-pole-btn" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 px-3 rounded-lg shadow-md flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        Add New Pole (GPS)
+                    </button>
+                </div>
             </div>
-            <div class="grid grid-cols-2 gap-2 mt-4">
-              <div class="p-2 border rounded-md">
-                 <div class="text-[10px] text-gray-400 uppercase font-bold">New Pole ID</div>
-                 <div class="font-mono text-gray-900">{${NEW_POLE_FIELD}}</div>
-              </div>
-              <div class="p-2 border rounded-md">
-                 <div class="text-[10px] text-gray-400 uppercase font-bold">Old Pole ID</div>
-                 <div class="font-mono text-gray-900">{${OLD_POLE_FIELD}}</div>
-              </div>
+        </div>
+    </header>
+
+    <div class="absolute z-40 top-36 left-4 sm:left-6 max-w-[500px] w-auto">
+        <div class="bg-white/90 backdrop-blur rounded-xl shadow-xl border border-white/40 p-4">
+            <div class="flex flex-wrap items-center gap-3">
+                <label for="layer-select" class="text-sm font-semibold text-gray-700">Layer</label>
+                <select id="layer-select" class="border border-gray-300 rounded-lg px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="transfer">Transfer</option>
+                    <option value="maintenance">Maintenance</option>
+                </select>
+                <div class="flex flex-1 min-w-[240px] gap-2 items-center">
+                    <input id="search-input" type="text" placeholder="Search by pole number or address" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <button id="search-btn" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 px-3 rounded-lg shadow-md whitespace-nowrap">Search</button>
+                </div>
+                <p class="text-xs text-gray-500 w-full">Status colors: Ready (green), Blocked (red), Completed (yellow), Unknown (gray)</p>
             </div>
-            <div class="mt-4 flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
-               <div>
-                  <div class="text-[10px] text-gray-400 uppercase font-bold">Current Status</div>
-                  <div class="font-bold text-gray-800">{Status}</div>
-               </div>
-               <div class="h-6 w-6 rounded-full border-2 border-white shadow-md bg-status-{Status}"></div>
-            </div>
-            <p class="text-[10px] text-gray-500 font-medium italic mt-2 text-center">Use actions below to update workflow status.</p>
-          </div>
-        `,
-        expressionInfos: [{
-          name: 'poleLabel',
-          expression: `IIF(!IsEmpty($feature.${NEW_POLE_FIELD}), $feature.${NEW_POLE_FIELD}, $feature.${OLD_POLE_FIELD})`
-        }],
-        actions: getPopupActions()
-      }
-    });
+        </div>
+    </div>
 
-    activeLayerRef.current = layer;
-    mapRef.current.add(layer);
-    
-    layer.load().then(() => {
-      refreshSearchSources(layer);
-    });
-  };
+    <script>
+        const FEATURE_LAYER_URL = "https://services7.arcgis.com/NanlOhKb0A7a7kSU/arcgis/rest/services/Pole_Transfer_System__DEV__Transfers/FeatureServer/0";
+        const MAINTENANCE_FEATURE_LAYER_URL = "https://services7.arcgis.com/NanlOhKb0A7a7kSU/arcgis/rest/services/Pole_Transfer_System__AppSheet_DEV__maintenance/FeatureServer/0"; 
+        const STATUS_FIELD_NAME = "Status";
+        const NEW_POLE_FIELD = "New_Pole__";
+        const OLD_POLE_FIELD = "Old_Pole__";
+        const POLE_NUMBER_FIELD = "PoleNumber";
+        const GEOCODER_URL = "https://geocode-api.arcgis.com/arcgis/rest/services/World/GeocodeServer";
 
-  useEffect(() => {
-    // @ts-ignore
-    require([
-      'esri/config',
-      'esri/Map',
-      'esri/views/MapView',
-      'esri/identity/OAuthInfo',
-      'esri/identity/IdentityManager',
-      'esri/core/reactiveUtils'
-    ], (esriConfig: any, Map: any, MapView: any, OAuthInfo: any, IdentityManager: any, reactiveUtils: any) => {
-      
-      const info = new OAuthInfo({
-        portalUrl: 'https://www.arcgis.com',
-        appId: 'c6dKp7cbBFCn4m8k',
-        popup: false,
-        redirectUri: 'https://kevincopeland42.github.io/Kevin/'
-      });
+        let map = null;
+        let view = null;
+        let activeLayer = null;
+        let layerView = null;
+        let activeLayerSchema = null;
+        let statusFieldInfo = null;
+        let esriRequestModule = null;
+        let searchWidget = null;
 
-      IdentityManager.registerOAuthInfos([info]);
-
-      IdentityManager.checkSignInStatus(`${info.portalUrl}/sharing`)
-        .catch(() => IdentityManager.getCredential(`${info.portalUrl}/sharing`))
-        .then(() => {
-          const map = new Map({ basemap: 'streets-navigation-vector' });
-          const view = new MapView({
-            container: mapDivRef.current,
-            map,
-            center: [-71.0589, 42.3601],
-            zoom: 12,
-            padding: { top: 160, left: 0, right: 0, bottom: 0 },
-            popup: {
-              dockEnabled: true,
-              dockOptions: { buttonEnabled: false, breakpoint: false }
-            }
-          });
-
-          mapRef.current = map;
-          viewRef.current = view;
-
-          // Init search widget (headless)
-          getArcGISModules().then(({ Search }) => {
-            const search = new Search({
-              view,
-              container: document.createElement('div'),
-              includeDefaultSources: false,
-              popupEnabled: true
-            });
-            searchWidgetRef.current = search;
-            switchLayer('transfer');
-          });
-
-          // Handle Popup actions
-          reactiveUtils.when(() => view.popup, () => {
-            view.popup.on('trigger-action', (event: any) => {
-              const feature = view.popup.selectedFeature;
-              if (!feature) return;
-              const objectId = feature.attributes?.OBJECTID;
-              if (!objectId) return;
-
-              const statusMap: Record<string, string> = {
-                'set-ready': 'Ready',
-                'set-blocked': 'Blocked',
-                'set-completed': 'Completed'
-              };
-              
-              if (statusMap[event.action.id]) {
-                updateStatusOnLayer(objectId, statusMap[event.action.id]);
-              }
-            });
-          });
-
-          // Expose actions
-          actionsRef.current = {
-            geolocate: () => {
-              if (!navigator.geolocation) {
-                onMessage('Geolocation is not supported.');
-                return;
-              }
-              navigator.geolocation.getCurrentPosition(pos => {
-                view.goTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 15 });
-              });
+        const statusRenderer = {
+            type: "unique-value",
+            field: STATUS_FIELD_NAME,
+            defaultSymbol: {
+                type: "simple-marker",
+                color: "#6b7280",
+                outline: { color: "#ffffff", width: 1 }
             },
-            handleAddNewPole: () => {
-              if (!navigator.geolocation) {
-                onMessage('GPS unavailable.');
-                return;
-              }
-              onMessage('Accessing GPS location...');
-              navigator.geolocation.getCurrentPosition(pos => {
-                addNewPoleAtLocation(pos.coords.latitude, pos.coords.longitude);
-              });
-            },
-            handleSearch: (val: string) => {
-              searchWidgetRef.current?.search(val);
+            uniqueValueInfos: [
+                {
+                    value: "Ready",
+                    symbol: { type: "simple-marker", color: "#16a34a", outline: { color: "#ffffff", width: 1 } },
+                    label: "Ready"
+                },
+                {
+                    value: "Blocked",
+                    symbol: { type: "simple-marker", color: "#dc2626", outline: { color: "#ffffff", width: 1 } },
+                    label: "Blocked"
+                },
+                {
+                    value: "Completed",
+                    symbol: { type: "simple-marker", color: "#eab308", outline: { color: "#ffffff", width: 1 } },
+                    label: "Completed"
+                }
+            ]
+        };
+
+        const showMessageBox = (message) => {
+            const dialog = document.createElement('div');
+            dialog.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50';
+            dialog.innerHTML = `
+                <div class="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full">
+                    <p class="mb-4 text-gray-800 whitespace-pre-wrap">${message}</p>
+                    <button onclick="this.parentNode.parentNode.remove()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors">
+                        Close
+                    </button>
+                </div>
+            `;
+            document.body.appendChild(dialog);
+        };
+
+        const getPopupActions = () => ([
+            { title: "Set Ready", id: "set-ready", className: "esri-icon-check-mark" },
+            { title: "Set Blocked", id: "set-blocked", className: "esri-icon-close" },
+            { title: "Set Completed", id: "set-completed", className: "esri-icon-checkbox-checked" }
+        ]);
+
+        const logCredentialStatus = () => {
+            try {
+                const credentials = (window.__esriIdentityManager && window.__esriIdentityManager.credentials) || [];
+                const credential = credentials.find((cred) => cred.server && activeLayer && cred.server.includes(activeLayer.url.split('/FeatureServer')[0]));
+                if (credential) {
+                    const expiresDate = new Date(credential.expires);
+                    console.info('[ArcGIS][Auth] Credential found', {
+                        userId: credential.userId,
+                        expires: credential.expires,
+                        expiresDate: expiresDate.toISOString(),
+                        isExpired: expiresDate.getTime() <= Date.now()
+                    });
+                    if (expiresDate.getTime() <= Date.now()) {
+                        console.warn('[ArcGIS][Auth] Credential is expired. Renew before applyEdits.');
+                    }
+                } else {
+                    console.warn('[ArcGIS][Auth] No credential found for active layer.');
+                }
+            } catch (err) {
+                console.error('[ArcGIS][Auth] Error while checking credentials', err);
             }
-          };
-        });
-    });
-  }, []);
+        };
 
-  useEffect(() => {
-    if (mapRef.current) {
-      switchLayer(activeLayerType);
-    }
-  }, [activeLayerType]);
+        const validateStatusValue = (rawStatus) => {
+            if (!statusFieldInfo) return { validated: rawStatus, note: 'No schema loaded; using raw status.' };
+            const fieldType = statusFieldInfo.type;
+            const domain = statusFieldInfo.domain;
+            if (domain && domain.codedValues && Array.isArray(domain.codedValues)) {
+                const match = domain.codedValues.find((cv) => cv.name === rawStatus || cv.code === rawStatus);
+                if (match) {
+                    return { validated: match.code, note: `Mapped status to domain code for ${rawStatus}` };
+                }
+                return { validated: rawStatus, note: 'Status not in coded values; sending raw.' };
+            }
+            if (fieldType && (fieldType.toLowerCase().includes('double') || fieldType.toLowerCase().includes('integer'))) {
+                const asNumber = Number(rawStatus);
+                return { validated: Number.isNaN(asNumber) ? rawStatus : asNumber, note: 'Numeric status field detected.' };
+            }
+            return { validated: rawStatus, note: 'Default validation path.' };
+        };
 
-  return <div ref={mapDivRef} className="fixed inset-0 w-full h-full z-0" />;
-};
+        const logApplyEditsRequest = (payload, method = 'POST', meta = {}) => {
+            const requestUrl = activeLayer?.url || 'Unknown URL';
+            console.info('[ArcGIS][applyEdits][Request]', {
+                url: requestUrl,
+                method,
+                payload,
+                payloadJson: JSON.stringify(payload, null, 2),
+                layerUrl: activeLayer?.url,
+                layerId: activeLayer?.layerId,
+                statusField: STATUS_FIELD_NAME,
+                meta,
+                oauthSession: (window.__esriIdentityManager && window.__esriIdentityManager.credentials?.map((c) => ({ userId: c.userId, server: c.server, expires: c.expires })) ) || []
+            });
+        };
 
-export default MapContainer;
+        const logApplyEditsResponse = (result) => {
+            console.info('[ArcGIS][applyEdits][Response raw]', result);
+            try {
+                console.info('[ArcGIS][applyEdits][Response JSON]', JSON.stringify(result, null, 2));
+            } catch (err) {
+                console.warn('[ArcGIS][applyEdits][Response stringify error]', err);
+            }
+        };
+
+        const surfaceArcGISError = (errorObj, fallback = 'Unknown update error.') => {
+            if (!errorObj) return fallback;
+            const code = errorObj.code || errorObj.error?.code;
+            const message = errorObj.message || errorObj.error?.message || errorObj.description;
+            const details = errorObj.details || errorObj.error?.details;
+            const stack = errorObj.stack;
+            const parts = [
+                code ? `Code: ${code}` : null,
+                message ? `Message: ${message}` : null,
+                details ? `Details: ${JSON.stringify(details)}` : null,
+                stack ? `Stack: ${stack}` : null
+            ].filter(Boolean);
+            return parts.length ? parts.join('\n') : fallback;
+        };
+
+        const fetchLayerSchema = async (layerUrl) => {
+            try {
+                const cleanUrl = layerUrl.split('?')[0];
+                console.info('[ArcGIS][Schema] Fetching schema for', cleanUrl);
+                const requestFn = esriRequestModule || window.__esriRequest;
+                let schema = null;
+                if (requestFn) {
+                    const response = await requestFn(`${cleanUrl}?f=json`, { responseType: 'json' });
+                    schema = response.data;
+                } else {
+                    const response = await fetch(`${cleanUrl}?f=json`);
+                    schema = await response.json();
+                }
+                console.info('[ArcGIS][Schema] Metadata', schema);
+                activeLayerSchema = schema;
+                statusFieldInfo = schema.fields?.find((f) => f.name === STATUS_FIELD_NAME) || null;
+                if (statusFieldInfo) {
+                    console.info('[ArcGIS][Schema] Status field info', statusFieldInfo);
+                    if (statusFieldInfo.domain) {
+                        console.info('[ArcGIS][Schema] Status domain', statusFieldInfo.domain);
+                    }
+                } else {
+                    console.warn('[ArcGIS][Schema] Status field not found in schema');
+                }
+                if (schema.capabilities) {
+                    console.info('[ArcGIS][Schema] Layer capabilities', schema.capabilities);
+                }
+            } catch (err) {
+                console.error('[ArcGIS][Schema] Failed to fetch schema', err);
+            }
+        };
+
+        const updateStatusOnLayer = async (objectId, newStatus) => {
+            if (!activeLayer) return;
+            logCredentialStatus();
+            const { validated, note } = validateStatusValue(newStatus);
+            console.info('[ArcGIS][Update] Status validation', { rawStatus: newStatus, validatedStatus: validated, note });
+            const payload = {
+                updateFeatures: [{
+                    attributes: {
+                        OBJECTID: objectId,
+                        [STATUS_FIELD_NAME]: validated
+                    }
+                }]
+            };
+            logApplyEditsRequest(payload, 'POST', { objectId, status: validated, rawStatus: newStatus });
+            try {
+                const result = await activeLayer.applyEdits(payload);
+                logApplyEditsResponse(result);
+                const updateResults =
+                    result.updateFeatureResults ||
+                    result.updateResults ||
+                    [];
+
+                const updateResult = updateResults[0];
+
+                const success = !!(updateResult && !updateResult.error);
+
+                if (success) {
+                    showMessageBox(`SUCCESS: Status updated to ${validated}.`);
+                    activeLayer.refresh();
+                    return;
+                }
+
+                const errorDetails = surfaceArcGISError(updateResult?.error);
+                showMessageBox(`FAILED to update pole ${objectId}.\n${errorDetails}`);
+            } catch (error) {
+                logApplyEditsResponse(error);
+                const message = surfaceArcGISError(error, `Network or applyEdits Error: ${error.message}`);
+                showMessageBox(message);
+            }
+        };
+
+        const addNewPoleAtLocation = async (lat, lng) => {
+            if (!activeLayer) return;
+            logCredentialStatus();
+            const payload = {
+                addFeatures: [{
+                    geometry: { type: "point", longitude: lng, latitude: lat },
+                    attributes: { [STATUS_FIELD_NAME]: 'Ready' }
+                }]
+            };
+            logApplyEditsRequest(payload, 'POST', { lat, lng, status: 'Ready' });
+            try {
+                const result = await activeLayer.applyEdits(payload);
+                logApplyEditsResponse(result);
+                const addResult = result.addFeatureResults?.[0];
+                if (addResult?.success) {
+                    const newId = addResult.objectId;
+                    showMessageBox('SUCCESS: New pole added at your location!');
+                    activeLayer.refresh();
+                    zoomToFeatureById(newId);
+                } else {
+                    const errorDetails = surfaceArcGISError(addResult?.error, 'Unknown add error. Check Feature Layer settings.');
+                    showMessageBox(`FAILED to add new pole.\n${errorDetails}`);
+                }
+            } catch (error) {
+                logApplyEditsResponse(error);
+                const message = surfaceArcGISError(error, `Network Error: ${error.message}`);
+                showMessageBox(message);
+            }
+        };
+
+        const zoomToFeatureById = async (objectId) => {
+            if (!activeLayer) return;
+            const { Query } = await esriModulePromise;
+            const query = new Query({
+                objectIds: [objectId],
+                outFields: ["*"],
+                returnGeometry: true
+            });
+            const result = await activeLayer.queryFeatures(query);
+            if (result.features.length > 0) {
+                const feature = result.features[0];
+                view.goTo({ target: feature.geometry, zoom: 17 });
+                view.popup.open({ features: [feature], location: feature.geometry });
+            }
+        };
+
+        const geolocate = () => {
+            if (!navigator.geolocation) {
+                showMessageBox('Geolocation is not supported by your browser.');
+                return;
+            }
+            navigator.geolocation.getCurrentPosition((position) => {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                view.goTo({ center: [lng, lat], zoom: 15 });
+            }, (error) => {
+                showMessageBox(`GPS Error: ${error.message}\nEnsure location services are enabled for your browser.`);
+                console.error('Geolocation Error:', error);
+            });
+        };
+
+        const handleAddNewPole = () => {
+            if (!navigator.geolocation) {
+                showMessageBox('Geolocation is not supported by your browser. Cannot add pole by GPS.');
+                return;
+            }
+            showMessageBox('Getting current GPS location...');
+            navigator.geolocation.getCurrentPosition(async (position) => {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                addNewPoleAtLocation(lat, lng);
+            }, (error) => {
+                showMessageBox(`GPS Error: ${error.message}\nEnsure location services are enabled for your browser.`);
+                console.error('Geolocation Error:', error);
+            });
+        };
+
+        const handlePopupAction = (event) => {
+            console.info('[ArcGIS][PopupAction] Triggered', event);
+            const feature = view.popup.selectedFeature;
+            if (!feature) return;
+            const objectId = feature.attributes?.OBJECTID;
+            if (!objectId) return;
+
+            if (event.action.id === 'set-ready') {
+                updateStatusOnLayer(objectId, 'Ready');
+            } else if (event.action.id === 'set-blocked') {
+                updateStatusOnLayer(objectId, 'Blocked');
+            } else if (event.action.id === 'set-completed') {
+                updateStatusOnLayer(objectId, 'Completed');
+            }
+        };
+
+        const refreshSearchSources = () => {
+            if (!searchWidget) return;
+            const geocoderSource = {
+                name: 'Address',
+                placeholder: 'Search address',
+                singleLineFieldName: 'SingleLine',
+                url: GEOCODER_URL
+            };
+            const resolveFields = (fields = []) => {
+                if (!activeLayer?.fields) return fields;
+                const existing = fields.filter((name) => activeLayer.fields.some((f) => f.name === name));
+                return existing.length ? existing : fields;
+            };
+
+            const searchFields = resolveFields([NEW_POLE_FIELD, OLD_POLE_FIELD, POLE_NUMBER_FIELD, 'Road', 'Town']);
+            const displayField = searchFields.includes(OLD_POLE_FIELD) ? OLD_POLE_FIELD : (searchFields[0] || POLE_NUMBER_FIELD);
+            const featureSource = activeLayer ? {
+                layer: activeLayer,
+                searchFields,
+                displayField,
+                suggestionTemplate: `{${NEW_POLE_FIELD}} / {${OLD_POLE_FIELD}} - {Road}, {Town}`,
+                exactMatch: false,
+                outFields: ['*'],
+                name: 'Poles',
+                placeholder: 'Pole #, Road, or Town'
+            } : null;
+            searchWidget.sources = featureSource ? [featureSource, geocoderSource] : [geocoderSource];
+        };
+
+        const setActiveLayer = async (layerKey) => {
+            if (!map) return;
+            const { FeatureLayer, Query } = await esriModulePromise;
+            console.info('[ArcGIS][Layer] Switching active layer', layerKey);
+            if (activeLayer) {
+                map.remove(activeLayer);
+                activeLayer.destroy();
+                activeLayer = null;
+            }
+
+            const url = layerKey === 'maintenance' ? MAINTENANCE_FEATURE_LAYER_URL : FEATURE_LAYER_URL;
+
+            if (!url) {
+                showMessageBox('No URL configured for this layer. Please update the MAINTENANCE_FEATURE_LAYER_URL value.');
+                return;
+            }
+
+            await fetchLayerSchema(url);
+
+            activeLayer = new FeatureLayer({
+                url,
+                outFields: ['*'],
+                renderer: statusRenderer,
+                popupTemplate: {
+                    title: 'Pole: {expression/poleLabel}',
+                    content: `
+                        <div class="space-y-2 text-sm">
+                            <div class="font-semibold text-gray-900">{Town} - {Road}</div>
+                            <div><strong>Pole #:</strong> {expression/poleLabel}</div>
+                            <div><strong>Status:</strong> {Status}</div>
+                            <div><strong>Lat/Lon:</strong> {Latitude}, {Longitude}</div>
+                            <p class="text-xs text-gray-500">Use the popup actions to change status.</p>
+                        </div>
+                    `,
+                    expressionInfos: [
+                        {
+                            name: 'poleLabel',
+                            expression: "IIF(!IsEmpty($feature.New_Pole__), $feature.New_Pole__, $feature.Old_Pole__)"
+                        }
+                    ],
+                    actions: getPopupActions()
+                }
+            });
+
+            map.add(activeLayer);
+
+            try {
+                await activeLayer.load();
+                const fieldDebug = (activeLayer.fields || []).map((f) => ({ name: f.name, alias: f.alias, type: f.type }));
+                console.log('[ArcGIS][Debug][Fields]', fieldDebug);
+
+                const debugQuery = new Query({ where: '1=1', outFields: ['*'], returnGeometry: false, num: 1 });
+                const debugResult = await activeLayer.queryFeatures(debugQuery);
+                const firstAttributes = debugResult.features?.[0]?.attributes || null;
+                console.log('[ArcGIS][Debug][FirstFeatureAttributes]', firstAttributes);
+            } catch (err) {
+                console.warn('[ArcGIS][Debug] Failed to log fields or sample feature', err);
+            }
+
+            view.whenLayerView(activeLayer).then((lv) => {
+                layerView = lv;
+            });
+
+            refreshSearchSources();
+        };
+
+        const handleSearch = async () => {
+            if (!searchWidget) return;
+            const searchValue = document.getElementById('search-input').value.trim();
+            if (!searchValue) return;
+            await searchWidget.search(searchValue);
+        };
+
+        const initializeMap = async () => {
+            require([
+                'esri/config',
+                'esri/Map',
+                'esri/views/MapView',
+                'esri/layers/FeatureLayer',
+                'esri/rest/support/Query',
+                'esri/rest/locator',
+                'esri/widgets/Search',
+                'esri/core/reactiveUtils',
+                'esri/identity/OAuthInfo',
+                'esri/identity/IdentityManager',
+                'esri/request'
+            ], (esriConfig, Map, MapView, FeatureLayer, Query, locator, Search, reactiveUtils, OAuthInfo, IdentityManager, esriRequest) => {
+                esriModulePromise.resolve({ Query, FeatureLayer, locator, Search });
+                window.__esriIdentityManager = IdentityManager;
+                window.__esriRequest = esriRequest;
+                esriRequestModule = esriRequest;
+
+                const info = new OAuthInfo({
+                    portalUrl: 'https://www.arcgis.com',
+                    appId: 'c6dKp7cbBFCn4m8k',
+                    popup: false,
+                    redirectUri: 'https://kevincopeland42.github.io/Kevin/'
+                });
+
+                IdentityManager.registerOAuthInfos([info]);
+
+                IdentityManager.checkSignInStatus(`${info.portalUrl}/sharing`)
+                    .catch(() => IdentityManager.getCredential(`${info.portalUrl}/sharing`))
+                    .then(() => {
+                        map = new Map({ basemap: 'streets-navigation-vector' });
+                        view = new MapView({
+                            container: 'map-view',
+                            map,
+                            center: [-71.0589, 42.3601],
+                            zoom: 12,
+                            padding: { top: 160, left: 0, right: 0, bottom: 0 },
+                            popup: {
+                                dockEnabled: true,
+                                dockOptions: { buttonEnabled: false, breakpoint: false }
+                            }
+                        });
+
+                        const hiddenSearchContainer = document.createElement('div');
+                        hiddenSearchContainer.style.display = 'none';
+                        searchWidget = new Search({
+                            view,
+                            container: hiddenSearchContainer,
+                            includeDefaultSources: false,
+                            popupEnabled: true,
+                            resultGraphicEnabled: true,
+                            locationEnabled: false,
+                            searchAllEnabled: true
+                        });
+
+                        setActiveLayer('transfer');
+
+                        reactiveUtils.when(() => view.popup, () => {
+                            view.popup.on('trigger-action', handlePopupAction);
+                        });
+                        document.getElementById('layer-select').addEventListener('change', (e) => setActiveLayer(e.target.value));
+                        document.getElementById('my-location-btn').addEventListener('click', geolocate);
+                        document.getElementById('add-pole-btn').addEventListener('click', handleAddNewPole);
+                        document.getElementById('search-btn').addEventListener('click', handleSearch);
+                        document.getElementById('search-input').addEventListener('keydown', (e) => {
+                            if (e.key === 'Enter') handleSearch();
+                        });
+                    })
+                    .catch((error) => {
+                        showMessageBox(`Authentication failed: ${error.message}`);
+                    });
+            });
+        };
+
+        const esriModulePromise = (() => {
+            let resolveFn;
+            const promise = new Promise((resolve) => { resolveFn = resolve; });
+            promise.resolve = resolveFn;
+            return promise;
+        })();
+
+        window.testArcGISUpdate = async (objectId, newStatus) => {
+            console.info('[ArcGIS][Debug][testArcGISUpdate] Starting manual update', { objectId, newStatus });
+            if (!activeLayer) {
+                console.warn('[ArcGIS][Debug][testArcGISUpdate] No active layer set.');
+                return;
+            }
+            logCredentialStatus();
+            const { validated, note } = validateStatusValue(newStatus);
+            console.info('[ArcGIS][Debug][testArcGISUpdate] Validation', { raw: newStatus, validated, note });
+            const payload = {
+                updateFeatures: [{
+                    attributes: {
+                        OBJECTID: objectId,
+                        [STATUS_FIELD_NAME]: validated
+                    }
+                }]
+            };
+            logApplyEditsRequest(payload, 'POST', { objectId, status: validated, rawStatus: newStatus, context: 'testArcGISUpdate' });
+            try {
+                const result = await activeLayer.applyEdits(payload);
+                logApplyEditsResponse(result);
+                const updateResult = result.updateFeatureResults?.[0];
+                if (updateResult?.success) {
+                    console.info('[ArcGIS][Debug][testArcGISUpdate] Success', updateResult);
+                } else {
+                    console.error('[ArcGIS][Debug][testArcGISUpdate] Failure', updateResult);
+                }
+            } catch (error) {
+                logApplyEditsResponse(error);
+                console.error('[ArcGIS][Debug][testArcGISUpdate] Exception', error);
+            }
+        };
+
+        window.onload = initializeMap;
+    </script>
+
+</body>
+
+</html>
+
+
 
 
 
